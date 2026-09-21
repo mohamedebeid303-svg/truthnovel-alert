@@ -3,9 +3,10 @@
     "805162451": {
       "works": [],
       "state": {
-        "step": "waiting_url",
+        "step": "waiting_chapter",
         "type": "رواية",
-        "name": "Lord Of Th Truth"
+        "name": "Lord Of Th Truth",
+        "url": "https://truthnovel.top/"
       }
     }
   }
