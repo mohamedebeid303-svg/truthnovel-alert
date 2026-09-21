@@ -2,7 +2,6 @@ import os
 import re
 import json
 import base64
-import time
 import requests
 from bs4 import BeautifulSoup
 
@@ -33,7 +32,10 @@ HTTP_HEADERS = {
         "(KHTML, like Gecko) "
         "Chrome/140.0 Safari/537.36"
     ),
-    "Accept": "text/html,application/xhtml+xml"
+    "Accept": (
+        "text/html,application/xhtml+xml,"
+        "application/xml;q=0.9,*/*;q=0.8"
+    )
 }
 
 
@@ -98,15 +100,16 @@ def save_data(data, sha):
         timeout=30
     )
 
-    # Another process may have changed data.json.
-    # Do not silently overwrite it.
     if response.status_code == 409:
+
         print(
             "[WARNING] data.json changed while monitoring."
         )
+
         print(
             "[WARNING] Changes were not overwritten."
         )
+
         return False
 
     response.raise_for_status()
@@ -152,7 +155,7 @@ def download_page(url):
 
 
 # =========================================================
-# CHAPTER DETECTION
+# NUMBER
 # =========================================================
 
 def normalize_number(value):
@@ -171,56 +174,211 @@ def normalize_number(value):
         return None
 
 
+# =========================================================
+# CHAPTER PATTERNS
+# =========================================================
+
+CHAPTER_PATTERNS = [
+
+    # -----------------------------------------------------
+    # English
+    # -----------------------------------------------------
+
+    r"\bchapter[\s._:#\-–—]*(\d+(?:\.\d+)?)",
+
+    r"\bchap[\s._:#\-–—]*(\d+(?:\.\d+)?)",
+
+    r"\bch[\s._:#\-–—]*(\d+(?:\.\d+)?)",
+
+    # -----------------------------------------------------
+    # Arabic
+    # -----------------------------------------------------
+
+    r"\bالفصل[\s._:#\-–—]*(\d+(?:\.\d+)?)",
+
+    # -----------------------------------------------------
+    # Chinese
+    # -----------------------------------------------------
+
+    r"第\s*(\d+(?:\.\d+)?)\s*章",
+
+    # -----------------------------------------------------
+    # Common URL forms
+    # -----------------------------------------------------
+
+    r"/chapter/(\d+(?:\.\d+)?)",
+
+    r"/chapter-(\d+(?:\.\d+)?)",
+
+    r"/chapter_(\d+(?:\.\d+)?)",
+
+    r"/chap/(\d+(?:\.\d+)?)",
+
+    r"/ch-(\d+(?:\.\d+)?)",
+
+    # -----------------------------------------------------
+    # Number immediately before title separator
+    #
+    # Example:
+    # 2454 - الاخ الاكبر
+    # 2452 – خواطر
+    # -----------------------------------------------------
+
+    r"(?<!\d)(\d{1,7})\s*[-–—:]\s*[^\d\n]{2,}",
+
+    # -----------------------------------------------------
+    # Number followed by Arabic title
+    # -----------------------------------------------------
+
+    r"(?<!\d)(\d{1,7})\s+[ء-ي][ء-ي\s\-–—]{2,}"
+]
+
+
+# =========================================================
+# EXTRACT NUMBERS FROM TEXT
+# =========================================================
+
 def extract_chapter_numbers(text):
 
-    patterns = [
-
-        # English
-        r"\bchapter[\s._:#-]*(\d+(?:\.\d+)?)",
-
-        # Arabic
-        r"\bالفصل[\s._:#-]*(\d+(?:\.\d+)?)",
-
-        # Chinese
-        r"第\s*(\d+(?:\.\d+)?)\s*章",
-
-        # Common URL / title forms
-        r"\bchap[\s._:#-]*(\d+(?:\.\d+)?)",
-
-        # "Ch 123"
-        r"\bch[\s._:#-]*(\d+(?:\.\d+)?)"
-    ]
+    if not text:
+        return []
 
     chapters = []
 
-    for pattern in patterns:
+    for pattern in CHAPTER_PATTERNS:
 
-        matches = re.findall(
-            pattern,
-            text,
-            flags=re.IGNORECASE
-        )
+        try:
+
+            matches = re.findall(
+                pattern,
+                text,
+                flags=re.IGNORECASE
+            )
+
+        except re.error:
+
+            continue
 
         for match in matches:
 
+            if isinstance(match, tuple):
+
+                match = match[0]
+
             number = normalize_number(match)
 
-            if number is not None:
-                chapters.append(number)
+            if number is None:
+                continue
+
+            # Avoid obviously unrelated tiny numbers.
+            if number < 1:
+                continue
+
+            # Avoid absurdly large numbers.
+            if number > 1000000:
+                continue
+
+            chapters.append(number)
 
     return chapters
 
 
-def extract_latest_chapter(html):
+# =========================================================
+# JSON-LD DETECTION
+# =========================================================
 
-    soup = BeautifulSoup(
-        html,
-        "html.parser"
+def extract_from_json_ld(soup):
+
+    chapters = []
+
+    scripts = soup.find_all(
+        "script",
+        attrs={
+            "type": "application/ld+json"
+        }
     )
 
-    # -----------------------------------------------------
-    # 1. Page title
-    # -----------------------------------------------------
+    for script in scripts:
+
+        raw = script.string
+
+        if not raw:
+            raw = script.get_text(
+                " ",
+                strip=True
+            )
+
+        if not raw:
+            continue
+
+        # First try normal JSON
+        try:
+
+            data = json.loads(raw)
+
+            serialized = json.dumps(
+                data,
+                ensure_ascii=False
+            )
+
+            chapters.extend(
+                extract_chapter_numbers(
+                    serialized
+                )
+            )
+
+        except Exception:
+
+            # Some sites contain malformed JSON-LD.
+            chapters.extend(
+                extract_chapter_numbers(
+                    raw
+                )
+            )
+
+    return chapters
+
+
+# =========================================================
+# DATA ATTRIBUTE DETECTION
+# =========================================================
+
+def extract_from_data_attributes(soup):
+
+    chapters = []
+
+    for tag in soup.find_all(True):
+
+        for attribute, value in tag.attrs.items():
+
+            if not attribute.startswith(
+                "data-"
+            ):
+                continue
+
+            if isinstance(value, list):
+
+                value = " ".join(value)
+
+            if not isinstance(value, str):
+                continue
+
+            chapters.extend(
+                extract_chapter_numbers(
+                    value
+                )
+            )
+
+    return chapters
+
+
+# =========================================================
+# TITLE DETECTION
+# =========================================================
+
+def extract_from_title(soup):
+
+    chapters = []
 
     if soup.title:
 
@@ -229,20 +387,32 @@ def extract_latest_chapter(html):
             strip=True
         )
 
-        chapters = extract_chapter_numbers(title)
+        chapters.extend(
+            extract_chapter_numbers(
+                title
+            )
+        )
 
-        if chapters:
-            return max(chapters)
+    return chapters
 
 
-    # -----------------------------------------------------
-    # 2. H1 / H2 / H3
-    # -----------------------------------------------------
+# =========================================================
+# HEADINGS DETECTION
+# =========================================================
 
-    headings = []
+def extract_from_headings(soup):
+
+    chapters = []
 
     for tag in soup.find_all(
-        ["h1", "h2", "h3", "h4"]
+        [
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6"
+        ]
     ):
 
         text = tag.get_text(
@@ -251,21 +421,23 @@ def extract_latest_chapter(html):
         )
 
         if text:
-            headings.append(text)
 
-    chapters = extract_chapter_numbers(
-        " ".join(headings)
-    )
+            chapters.extend(
+                extract_chapter_numbers(
+                    text
+                )
+            )
 
-    if chapters:
-        return max(chapters)
+    return chapters
 
 
-    # -----------------------------------------------------
-    # 3. Links
-    # -----------------------------------------------------
+# =========================================================
+# LINKS DETECTION
+# =========================================================
 
-    links = []
+def extract_from_links(soup):
+
+    chapters = []
 
     for link in soup.find_all("a"):
 
@@ -280,37 +452,126 @@ def extract_latest_chapter(html):
         )
 
         if text:
-            links.append(text)
+
+            chapters.extend(
+                extract_chapter_numbers(
+                    text
+                )
+            )
 
         if href:
-            links.append(href)
 
-    chapters = extract_chapter_numbers(
-        " ".join(links)
-    )
+            chapters.extend(
+                extract_chapter_numbers(
+                    href
+                )
+            )
 
-    if chapters:
-        return max(chapters)
+    return chapters
 
 
-    # -----------------------------------------------------
-    # 4. Full page text
-    # -----------------------------------------------------
+# =========================================================
+# FULL PAGE DETECTION
+# =========================================================
+
+def extract_from_page_text(soup):
 
     page_text = soup.get_text(
         " ",
         strip=True
     )
 
-    chapters = extract_chapter_numbers(
+    return extract_chapter_numbers(
         page_text
     )
 
-    if chapters:
-        return max(chapters)
 
+# =========================================================
+# LATEST CHAPTER
+# =========================================================
 
-    return None
+def extract_latest_chapter(html):
+
+    soup = BeautifulSoup(
+        html,
+        "html.parser"
+    )
+
+    candidates = []
+
+    # -----------------------------------------------------
+    # Detector 1
+    # JSON-LD
+    # -----------------------------------------------------
+
+    candidates.extend(
+        extract_from_json_ld(
+            soup
+        )
+    )
+
+    # -----------------------------------------------------
+    # Detector 2
+    # Data attributes
+    # -----------------------------------------------------
+
+    candidates.extend(
+        extract_from_data_attributes(
+            soup
+        )
+    )
+
+    # -----------------------------------------------------
+    # Detector 3
+    # Page title
+    # -----------------------------------------------------
+
+    candidates.extend(
+        extract_from_title(
+            soup
+        )
+    )
+
+    # -----------------------------------------------------
+    # Detector 4
+    # Headings
+    # -----------------------------------------------------
+
+    candidates.extend(
+        extract_from_headings(
+            soup
+        )
+    )
+
+    # -----------------------------------------------------
+    # Detector 5
+    # Links
+    # -----------------------------------------------------
+
+    candidates.extend(
+        extract_from_links(
+            soup
+        )
+    )
+
+    # -----------------------------------------------------
+    # Detector 6
+    # Full page text
+    # -----------------------------------------------------
+
+    candidates.extend(
+        extract_from_page_text(
+            soup
+        )
+    )
+
+    if not candidates:
+
+        return None
+
+    return max(
+        candidates
+    )
 
 
 # =========================================================
@@ -327,11 +588,17 @@ def display_chapter(chapter):
         number = float(chapter)
 
         if number.is_integer():
-            return str(int(number))
+
+            return str(
+                int(number)
+            )
 
         return str(number)
 
-    except (ValueError, TypeError):
+    except (
+        ValueError,
+        TypeError
+    ):
 
         return str(chapter)
 
@@ -372,12 +639,14 @@ def monitor_work(chat_id, work):
 
 
     # -----------------------------------------------------
-    # Download page
+    # Download
     # -----------------------------------------------------
 
     try:
 
-        html = download_page(url)
+        html = download_page(
+            url
+        )
 
     except Exception as error:
 
@@ -393,7 +662,7 @@ def monitor_work(chat_id, work):
 
 
     # -----------------------------------------------------
-    # Detect chapter
+    # Detect
     # -----------------------------------------------------
 
     latest_chapter = extract_latest_chapter(
@@ -449,7 +718,7 @@ def monitor_work(chat_id, work):
 
 
     # -----------------------------------------------------
-    # Nothing new
+    # No new chapter
     # -----------------------------------------------------
 
     if latest_chapter <= old_number:
@@ -470,15 +739,18 @@ def monitor_work(chat_id, work):
     )
 
 
-    # We send one notification containing
-    # the newest chapter available.
     message = (
         "🔔 فصل جديد!\n\n"
         f"📖 {name}\n"
-        f"📚 الفصل {display_chapter(latest_chapter)}\n\n"
+        f"📚 الفصل "
+        f"{display_chapter(latest_chapter)}\n\n"
         f"🔗 {url}"
     )
 
+
+    # -----------------------------------------------------
+    # Telegram
+    # -----------------------------------------------------
 
     try:
 
@@ -493,16 +765,18 @@ def monitor_work(chat_id, work):
             "[ERROR] Telegram notification failed."
         )
 
-        print(error)
+        print(
+            error
+        )
 
-        # IMPORTANT:
-        # Do not update last_chapter if Telegram
+        # Do not update chapter if
         # notification failed.
+
         return False
 
 
     # -----------------------------------------------------
-    # Save new chapter in memory
+    # Update chapter
     # -----------------------------------------------------
 
     work["last_chapter"] = latest_chapter
@@ -527,7 +801,6 @@ def monitor_all_users(data):
         {}
     )
 
-
     print(
         f"[INFO] Total users: {len(users)}"
     )
@@ -540,11 +813,7 @@ def monitor_all_users(data):
             []
         )
 
-
-        print(
-            ""
-        )
-
+        print("")
         print(
             f"[USER] {chat_id}"
         )
@@ -564,6 +833,7 @@ def monitor_all_users(data):
                 )
 
                 if result:
+
                     changed = True
 
             except Exception as error:
@@ -572,7 +842,9 @@ def monitor_all_users(data):
                     "[ERROR] Unexpected work error:"
                 )
 
-                print(error)
+                print(
+                    error
+                )
 
 
     return changed
@@ -598,14 +870,14 @@ def main():
 
 
     # -----------------------------------------------------
-    # Load users and works
+    # Load data
     # -----------------------------------------------------
 
     data, sha = load_data()
 
 
     # -----------------------------------------------------
-    # Monitor everything
+    # Monitor
     # -----------------------------------------------------
 
     changed = monitor_all_users(
@@ -614,14 +886,12 @@ def main():
 
 
     # -----------------------------------------------------
-    # Save only if something changed
+    # Save
     # -----------------------------------------------------
 
     if changed:
 
-        print(
-            ""
-        )
+        print("")
 
         print(
             "[SAVE] Updating data.json..."
@@ -646,18 +916,14 @@ def main():
 
     else:
 
-        print(
-            ""
-        )
+        print("")
 
         print(
             "[SAVE] No changes."
         )
 
 
-    print(
-        ""
-    )
+    print("")
 
     print(
         "[DONE]"
@@ -669,4 +935,5 @@ def main():
 # =========================================================
 
 if __name__ == "__main__":
+
     main()
