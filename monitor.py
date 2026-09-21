@@ -5,7 +5,7 @@ import base64
 import time
 import html as html_module
 from collections import defaultdict
-from urllib.parse import urljoin, urlparse, urldefrag
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -28,8 +28,6 @@ REQUEST_TIMEOUT = 30
 API_TIMEOUT = 15
 MAX_RETRIES = 3
 
-# لا نحاول اكتشاف API عشوائيًا من كل رابط.
-# نستخدم فقط المسارات الشائعة والروابط التي تبدو فعلًا كـ API.
 COMMON_API_PATHS = (
     "/wp-json/",
     "/api/",
@@ -124,8 +122,6 @@ def save_data(data, sha):
         timeout=REQUEST_TIMEOUT,
     )
 
-    # 409 يعني أن data.json تغير أثناء التشغيل.
-    # لا نريد الكتابة فوق التغييرات الجديدة.
     if response.status_code == 409:
         print("[WARNING] data.json changed while monitoring.")
         print("[WARNING] Changes were NOT overwritten.")
@@ -177,7 +173,6 @@ def request_with_retry(
                 allow_redirects=allow_redirects,
             )
 
-            # أخطاء مؤقتة يمكن إعادة المحاولة عليها.
             if response.status_code in (
                 408,
                 425,
@@ -187,7 +182,6 @@ def request_with_retry(
                 503,
                 504,
             ):
-
                 raise requests.HTTPError(
                     f"Temporary HTTP status "
                     f"{response.status_code}"
@@ -232,7 +226,6 @@ def download_page(url):
 
     text = response.text
 
-    # بعض المواقع لا تضبط Content-Type بشكل صحيح.
     looks_like_document = (
         text.lstrip().startswith(
             (
@@ -284,7 +277,6 @@ def normalize_number(value):
         return None
 
     value = normalize_digits(value)
-
     value = str(value).strip()
 
     value = value.replace(",", "")
@@ -323,13 +315,18 @@ def display_chapter(chapter):
 # CHAPTER PATTERNS
 # ============================================================
 
-# أنماط قوية: الرقم مرتبط بوضوح بالفصل.
+# أنماط قوية:
+# الرقم مرتبط مباشرة بكلمة تدل على الفصل.
 STRONG_CHAPTER_PATTERNS = [
 
     # English
     r"\bchapter\s*(?:no\.?|number)?\s*[:#._\-–—]?\s*(\d+(?:\.\d+)?)",
     r"\bchap(?:ter)?\s*[:#._\-–—]?\s*(\d+(?:\.\d+)?)",
     r"\bch\s*[:#._\-–—]?\s*(\d+(?:\.\d+)?)",
+
+    # English episode
+    r"\bepisode\s*(?:no\.?|number)?\s*[:#._\-–—]?\s*(\d+(?:\.\d+)?)",
+    r"\bep\s*[:#._\-–—]?\s*(\d+(?:\.\d+)?)",
 
     # Arabic
     r"\bالفصل\s*(?:رقم)?\s*[:#._\-–—]?\s*(\d+(?:\.\d+)?)",
@@ -342,9 +339,11 @@ STRONG_CHAPTER_PATTERNS = [
     r"/chapter/(\d+(?:\.\d+)?)",
     r"/chapter-(\d+(?:\.\d+)?)",
     r"/chapter_(\d+(?:\.\d+)?)",
+
     r"/chap/(\d+(?:\.\d+)?)",
     r"/chap-(\d+(?:\.\d+)?)",
     r"/chap_(\d+(?:\.\d+)?)",
+
     r"/ch/(\d+(?:\.\d+)?)",
     r"/ch-(\d+(?:\.\d+)?)",
     r"/ch_(\d+(?:\.\d+)?)",
@@ -352,15 +351,18 @@ STRONG_CHAPTER_PATTERNS = [
     # Query parameters
     r"[?&](?:chapter|chap|ch|episode|ep)[=_-](\d+(?:\.\d+)?)",
 
-    # بعض المواقع تستخدم chapter-number
+    # Chapter number / ID
     r"\bchapter[-_ ]number\s*[:=]\s*(\d+(?:\.\d+)?)",
     r"\bchapter[-_ ]id\s*[:=]\s*(\d+(?:\.\d+)?)",
 ]
 
 
-# أنماط أضعف: مفيدة لمواقع الروايات التي تعرض:
-# 2455 - اسم الفصل
-# 2455 اسم الفصل
+# ============================================================
+# WEAK CHAPTER PATTERNS
+# ============================================================
+
+# هذه الأنماط مفيدة لبعض مواقع الروايات،
+# لكنها لا تعني أن الرقم فصل بشكل مؤكد.
 WEAK_CHAPTER_PATTERNS = [
 
     r"(?<!\d)(\d{1,7})\s*[-–—:]\s*[^\d\n]{2,}",
@@ -371,7 +373,81 @@ WEAK_CHAPTER_PATTERNS = [
 ]
 
 
-# أسماء حقول JSON الشائعة التي تحمل رقم الفصل.
+# ============================================================
+# SUSPICIOUS NUMBERS
+# ============================================================
+
+# السنوات الشائعة.
+# لن نرفضها دائمًا، لأن Chapter 2025 ممكن نظريًا.
+# لكن إذا ظهرت بدون سياق فصل واضح، سيتم رفضها.
+YEAR_MIN = 1900
+YEAR_MAX = 2100
+
+
+EXPLICIT_CHAPTER_CONTEXT_PATTERNS = (
+
+    # English
+    r"\bchapter\b",
+    r"\bchap\b",
+    r"\bch\b",
+    r"\bepisode\b",
+    r"\bep\b",
+
+    # Arabic
+    r"\bالفصل\b",
+    r"\bفصل\b",
+
+    # Chinese
+    r"章",
+)
+
+
+def has_explicit_chapter_context(text):
+    if not text:
+        return False
+
+    text = normalize_digits(str(text))
+
+    for pattern in EXPLICIT_CHAPTER_CONTEXT_PATTERNS:
+
+        if re.search(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        ):
+            return True
+
+    return False
+
+
+def is_suspicious_year(
+    number,
+    context="",
+):
+    number = normalize_number(number)
+
+    if number is None:
+        return False
+
+    if not isinstance(number, int):
+        return False
+
+    if YEAR_MIN <= number <= YEAR_MAX:
+
+        # إذا كان السياق يحتوي على Chapter / Episode
+        # فقد يكون رقم الفصل حقيقيًا.
+        if has_explicit_chapter_context(context):
+            return False
+
+        return True
+
+    return False
+
+
+# ============================================================
+# JSON FIELD NAMES
+# ============================================================
+
 CHAPTER_FIELD_NAMES = {
     "chapter",
     "chapter_number",
@@ -408,7 +484,7 @@ class Candidate:
         self.source = source
         self.context = str(
             context or ""
-        )[:300]
+        )[:500]
 
     def __repr__(self):
         return (
@@ -505,9 +581,11 @@ def safe_json_loads(raw):
     raw = raw.strip()
 
     try:
+
         return json.loads(raw)
 
     except Exception:
+
         return None
 
 
@@ -517,11 +595,6 @@ def collect_json_candidates(
     source,
     parent_key="",
 ):
-    """
-    تحليل JSON بشكل recursive.
-    إذا كان المفتاح نفسه اسمه chapter_number
-    نعطي الرقم وزنًا عاليًا.
-    """
 
     if isinstance(obj, dict):
 
@@ -551,13 +624,12 @@ def collect_json_candidates(
                     candidates.append(
                         Candidate(
                             number,
-                            150,
+                            170,
                             f"{source} field",
                             f"{key}: {value}",
                         )
                     )
 
-            # نواصل النزول داخل JSON
             collect_json_candidates(
                 value,
                 candidates,
@@ -626,8 +698,6 @@ def extract_from_json_text(
 
         return
 
-    # JSON غير صالح بالكامل،
-    # نحلله كنص.
     add_candidates(
         candidates,
         extract_matches(
@@ -663,7 +733,7 @@ def extract_from_title(
             text,
             STRONG_CHAPTER_PATTERNS,
         ),
-        110,
+        120,
         "HTML title",
         text,
     )
@@ -710,7 +780,7 @@ def extract_from_headings(
                 text,
                 STRONG_CHAPTER_PATTERNS,
             ),
-            115,
+            120,
             f"HTML {tag.name}",
             text,
         )
@@ -721,7 +791,7 @@ def extract_from_headings(
                 text,
                 WEAK_CHAPTER_PATTERNS,
             ),
-            80,
+            70,
             f"HTML {tag.name}",
             text,
         )
@@ -756,7 +826,7 @@ def extract_from_links(
                     text,
                     STRONG_CHAPTER_PATTERNS,
                 ),
-                120,
+                125,
                 "chapter link text",
                 text,
             )
@@ -767,7 +837,7 @@ def extract_from_links(
                     text,
                     WEAK_CHAPTER_PATTERNS,
                 ),
-                95,
+                90,
                 "chapter link text",
                 text,
             )
@@ -780,7 +850,7 @@ def extract_from_links(
                     href,
                     STRONG_CHAPTER_PATTERNS,
                 ),
-                130,
+                140,
                 "chapter URL",
                 href,
             )
@@ -861,7 +931,7 @@ def extract_from_data_attributes(
                 )
             ):
 
-                strong_score = 135
+                strong_score = 140
                 weak_score = 75
 
             else:
@@ -990,7 +1060,7 @@ def extract_from_scripts(
                     raw,
                     STRONG_CHAPTER_PATTERNS,
                 ),
-                105,
+                110,
                 "JavaScript",
                 raw,
             )
@@ -1001,12 +1071,11 @@ def extract_from_scripts(
                     raw,
                     WEAK_CHAPTER_PATTERNS,
                 ),
-                60,
+                55,
                 "JavaScript",
                 raw,
             )
 
-            # محاولة تحليل JSON الموجود داخل script
             extract_from_json_text(
                 raw,
                 candidates,
@@ -1015,7 +1084,6 @@ def extract_from_scripts(
 
         else:
 
-            # لا نعطي JavaScript العادي وزنًا كبيرًا.
             add_candidates(
                 candidates,
                 extract_matches(
@@ -1092,7 +1160,7 @@ def extract_from_raw_html(
             decoded,
             STRONG_CHAPTER_PATTERNS,
         ),
-        45,
+        50,
         "raw HTML",
         decoded,
     )
@@ -1121,7 +1189,7 @@ def extract_from_page_text(
             text,
             STRONG_CHAPTER_PATTERNS,
         ),
-        50,
+        55,
         "page text",
         text,
     )
@@ -1132,7 +1200,7 @@ def extract_from_page_text(
             text,
             WEAK_CHAPTER_PATTERNS,
         ),
-        18,
+        15,
         "page text",
         text,
     )
@@ -1163,7 +1231,6 @@ def discover_api_urls(
         page_url
     )
 
-    # API paths شائعة
     for path in COMMON_API_PATHS:
 
         urls.add(
@@ -1173,7 +1240,6 @@ def discover_api_urls(
             )
         )
 
-    # الروابط الموجودة داخل الصفحة
     for tag in soup.find_all(
         [
             "a",
@@ -1226,8 +1292,6 @@ def extract_from_api(
         soup,
     )
 
-    # لا نريد عشرات الطلبات في كل دورة.
-    # نضع حدًا منطقيًا.
     api_urls = list(api_urls)[:15]
 
     for api_url in api_urls:
@@ -1289,15 +1353,6 @@ def discover_sitemap_urls(
         page_url
     )
 
-    parsed = urlparse(
-        page_url
-    )
-
-    root = (
-        f"{parsed.scheme}://"
-        f"{parsed.netloc}"
-    )
-
     urls = {
         urljoin(
             base_url,
@@ -1337,8 +1392,6 @@ def extract_from_sitemap(
             if not content:
                 continue
 
-            # sitemap غالبًا XML.
-            # نبحث فيه عن روابط الفصول.
             add_candidates(
                 candidates,
                 extract_matches(
@@ -1384,15 +1437,53 @@ def candidate_is_reasonable(
         old_chapter
     )
 
+    # --------------------------------------------------------
+    # حماية من السنوات والتواريخ
+    # --------------------------------------------------------
+
+    if is_suspicious_year(
+        number,
+        candidate.context,
+    ):
+
+        print(
+            "[FILTER] Rejected suspicious "
+            f"year-like number: {number}"
+        )
+
+        print(
+            f"          Source: {candidate.source}"
+        )
+
+        context = (
+            candidate.context
+            .replace("\n", " ")
+            .strip()
+        )
+
+        if context:
+            print(
+                f"          Context: {context[:180]}"
+            )
+
+        return False
+
+    # --------------------------------------------------------
+    # حماية من القفزات غير المنطقية
+    # --------------------------------------------------------
+
     if old is not None:
 
-        # رقم أكبر بمقدار ضخم جدًا غالبًا
-        # ليس رقم فصل.
         if number > old + 100000:
+
             return False
 
     return True
 
+
+# ============================================================
+# CANDIDATE RANKING
+# ============================================================
 
 def rank_candidates(
     candidates,
@@ -1421,6 +1512,10 @@ def rank_candidates(
 
     ranked = []
 
+    old = normalize_number(
+        old_chapter
+    )
+
     for number, items in grouped.items():
 
         total_score = sum(
@@ -1433,7 +1528,10 @@ def rank_candidates(
             for item in items
         )
 
-        # تأكيد من مصادر مستقلة.
+        # ----------------------------------------------------
+        # تأكيد من مصادر مستقلة
+        # ----------------------------------------------------
+
         if len(sources) >= 2:
             total_score += 35
 
@@ -1443,15 +1541,18 @@ def rank_candidates(
         if len(sources) >= 4:
             total_score += 45
 
-        # تكرار الرقم في الصفحة.
+        # ----------------------------------------------------
+        # تكرار الرقم
+        # ----------------------------------------------------
+
         total_score += min(
             len(items) * 5,
             40,
         )
 
-        old = normalize_number(
-            old_chapter
-        )
+        # ----------------------------------------------------
+        # العلاقة مع آخر فصل مسجل
+        # ----------------------------------------------------
 
         if old is not None:
 
@@ -1461,15 +1562,46 @@ def rank_candidates(
 
             # الفصل التالي مباشرة.
             if difference == 1:
-                total_score += 120
 
-            # عدة فصول جديدة.
+                total_score += 180
+
+            # عدد صغير من الفصول الجديدة.
             elif 1 < difference <= 20:
-                total_score += 45
 
-            # الرقم القديم أقل أهمية قليلًا.
+                total_score += 65
+
+            # عدد متوسط من الفصول الجديدة.
+            elif 20 < difference <= 100:
+
+                total_score += 20
+
+            # رقم أقل من الفصل القديم.
             elif difference < 0:
-                total_score -= 10
+
+                total_score -= 15
+
+            # ------------------------------------------------
+            # الأرقام البعيدة جدًا تحتاج دليلًا أقوى.
+            # لا نحذفها مباشرة، لأن بعض المواقع قد تقفز
+            # بعدد كبير من الفصول.
+            # ------------------------------------------------
+            elif difference > 100:
+
+                explicit_evidence = any(
+                    has_explicit_chapter_context(
+                        evidence.context
+                    )
+                    for evidence in
+                    items
+                )
+
+                if explicit_evidence:
+
+                    total_score += 5
+
+                else:
+
+                    total_score -= 80
 
         ranked.append(
             {
@@ -1923,7 +2055,6 @@ def monitor_work(
         print(error)
 
         # لا نحدث last_chapter.
-        # عند التشغيل التالي سيحاول الإرسال مرة أخرى.
         return False
 
     # --------------------------------------------------------
