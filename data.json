@@ -1,13 +1,15 @@
 {
   "users": {
     "805162451": {
-      "works": [],
-      "state": {
-        "step": "waiting_chapter",
-        "type": "رواية",
-        "name": "Lord Of Th Truth",
-        "url": "https://truthnovel.top/"
-      }
+      "works": [
+        {
+          "type": "رواية",
+          "name": "Lord Of Th Truth",
+          "url": "https://truthnovel.top/",
+          "last_chapter": 2454
+        }
+      ],
+      "state": null
     }
   }
 }
