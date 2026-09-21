@@ -10,12 +10,13 @@
         }
       ],
       "state": {
-        "step": "waiting_url",
+        "step": "waiting_chapter",
         "type": "رواية",
-        "name": "Worthless Profession: Dragon Tamer"
+        "name": "Worthless Profession: Dragon Tamer",
+        "url": "https://www.divinedaolibrary.com/story/worthless-profession-dragon-tamer/"
       },
       "first_seen": 1790025835463,
-      "last_active": 1790031639063
+      "last_active": 1790031652496
     },
     "2057656653": {
       "works": [],
