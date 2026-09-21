@@ -3,7 +3,8 @@
     "805162451": {
       "works": [],
       "state": {
-        "step": "waiting_type"
+        "step": "waiting_name",
+        "type": "رواية"
       }
     }
   }
