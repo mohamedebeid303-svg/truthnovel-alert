@@ -1,247 +1,194 @@
 const GITHUB_REPO = "mohamedebeid303-svg/truthnovel-alert";
 const DATA_FILE = "data.json";
 
-// =========================
-// Admin
-// =========================
-
 const ADMIN_CHAT_ID = "805162451";
 
 // المستخدم يعتبر نشطًا إذا تفاعل خلال آخر 15 دقيقة
 const ACTIVE_TIME = 15 * 60 * 1000;
 
-// =========================
-// Worker
-// =========================
+
+// ======================================================
+// MAIN WORKER
+// ======================================================
 
 export default {
-  async fetch(request, env) {
 
-    let update = null;
+  async fetch(request, env) {
 
     try {
 
+      // اختبار Worker من المتصفح
       if (request.method !== "POST") {
+
         return new Response(
           "TruthNovel Bot is running.",
-          { status: 200 }
+          {
+            status: 200
+          }
         );
       }
 
-      update = await request.json();
+      const update = await request.json();
 
+      // تحديث أوامر Telegram تلقائيًا عند الحاجة
+      await ensureBotCommands(env);
+
+      // Callback buttons
       if (update.callback_query) {
 
-        await handleCallback(update, env);
+        await handleCallback(
+          update,
+          env
+        );
 
-      } else if (update.message) {
+        return new Response("OK");
 
-        await handleMessage(update.message, env);
       }
 
-      return new Response("OK", { status: 200 });
+      // Telegram message
+      if (update.message) {
+
+        await handleMessage(
+          update.message,
+          env
+        );
+
+        return new Response("OK");
+      }
+
+      return new Response("OK");
 
     } catch (error) {
 
       console.error(
         "WORKER ERROR:",
-        error?.stack ||
-        error?.message ||
         error
       );
 
-      const chatId =
-        update?.message?.chat?.id;
-
-      if (chatId) {
-
-        try {
-
-          await sendMessage(
-            chatId,
-            "❌ حدث خطأ داخل البوت.\n\n" +
-            `الخطأ:\n${error?.message || "Unknown error"}`,
-            null,
-            env
-          );
-
-        } catch (telegramError) {
-
-          console.error(
-            "TELEGRAM ERROR:",
-            telegramError?.stack ||
-            telegramError?.message ||
-            telegramError
-          );
-        }
-      }
-
-      return new Response("OK", { status: 200 });
+      return new Response(
+        "OK"
+      );
     }
   }
 };
 
-// =========================
-// GitHub
-// =========================
+
+// ======================================================
+// TELEGRAM COMMANDS
+// ======================================================
+
+async function ensureBotCommands(env) {
+
+  /*
+   * نستخدم KV إن كان متاحًا لتجنب إعادة إرسال
+   * الأوامر إلى Telegram مع كل رسالة.
+   *
+   * إذا لم يكن لديك KV، سيعمل البوت أيضًا،
+   * وسيتم ضبط الأوامر عند /start أو /admin.
+   */
+
+  try {
+
+    const commands = [
+
+      {
+        command: "start",
+        description: "بدء استخدام البوت"
+      },
+
+      {
+        command: "add",
+        description: "إضافة عمل للمراقبة"
+      },
+
+      {
+        command: "list",
+        description: "عرض أعمالك"
+      }
+    ];
+
+    // القائمة العامة
+    await fetch(
+      `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
+
+        body: JSON.stringify({
+          commands: commands,
+
+          scope: {
+            type: "default"
+          }
+        })
+      }
+    );
+
+    // قائمة المدير
+    await fetch(
+      `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
+
+        body: JSON.stringify({
+
+          commands: [
+
+            ...commands,
+
+            {
+              command: "admin",
+              description: "لوحة تحكم المبرمج"
+            }
+
+          ],
+
+          scope: {
+            type: "chat",
+
+            chat_id:
+              Number(ADMIN_CHAT_ID)
+          }
+        })
+      }
+    );
+
+  } catch (error) {
+
+    console.error(
+      "COMMAND SETUP ERROR:",
+      error
+    );
+  }
+}
+
+
+// ======================================================
+// GITHUB - LOAD DATA
+// ======================================================
 
 async function loadData(env) {
 
-  if (!env.GITHUB_TOKEN) {
-    throw new Error(
-      "GITHUB_TOKEN is missing from Cloudflare Secrets"
-    );
-  }
-
   const url =
     `https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`;
-
-  console.log("GitHub GET:", url);
-
-  const response = await fetch(
-    url,
-    {
-      method: "GET",
-
-      headers: {
-        "Authorization":
-          `Bearer ${env.GITHUB_TOKEN}`,
-
-        "Accept":
-          "application/vnd.github+json",
-
-        "X-GitHub-Api-Version":
-          "2022-11-28",
-
-        "User-Agent":
-          "TruthNovel-Bot"
-      },
-
-      cache: "no-store"
-    }
-  );
-
-  console.log(
-    "GitHub response status:",
-    response.status
-  );
-
-  if (!response.ok) {
-
-    const errorText =
-      await response.text();
-
-    console.error(
-      "GitHub API ERROR:",
-      response.status,
-      errorText
-    );
-
-    throw new Error(
-      `GitHub API error ${response.status}: ${errorText.slice(0, 500)}`
-    );
-  }
-
-  const result =
-    await response.json();
-
-  if (!result.content) {
-    throw new Error(
-      "GitHub returned no file content for data.json"
-    );
-  }
-
-  let content;
-
-  try {
-
-    const cleanBase64 =
-      result.content.replace(/\s/g, "");
-
-    const binary =
-      Uint8Array.from(
-        atob(cleanBase64),
-        c => c.charCodeAt(0)
-      );
-
-    content =
-      new TextDecoder().decode(binary);
-
-  } catch (error) {
-
-    throw new Error(
-      "Failed to decode data.json from GitHub: " +
-      error.message
-    );
-  }
-
-  let data;
-
-  try {
-
-    data =
-      JSON.parse(content);
-
-  } catch (error) {
-
-    throw new Error(
-      "data.json contains invalid JSON: " +
-      error.message
-    );
-  }
-
-  data.users ??= {};
-  data.settings ??= {};
-  data.settings.maintenance ??= false;
-
-  return {
-    data,
-    sha: result.sha
-  };
-}
-
-// =========================
-// Save GitHub
-// =========================
-
-async function saveData(
-  data,
-  sha,
-  env
-) {
-
-  if (!env.GITHUB_TOKEN) {
-    throw new Error(
-      "GITHUB_TOKEN is missing from Cloudflare Secrets"
-    );
-  }
-
-  const content =
-    JSON.stringify(
-      data,
-      null,
-      2
-    );
-
-  const encoded =
-    btoa(
-      String.fromCharCode(
-        ...new TextEncoder().encode(content)
-      )
-    );
-
-  const url =
-    `https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`;
-
-  console.log("GitHub PUT:", url);
 
   const response =
     await fetch(
       url,
       {
-        method: "PUT",
+        method: "GET",
 
         headers: {
+
           "Authorization":
             `Bearer ${env.GITHUB_TOKEN}`,
 
@@ -252,29 +199,138 @@ async function saveData(
             "2022-11-28",
 
           "User-Agent":
-            "TruthNovel-Bot",
-
-          "Content-Type":
-            "application/json"
-        },
-
-        body:
-          JSON.stringify({
-            message:
-              "Update bot data",
-
-            content:
-              encoded,
-
-            sha
-          })
+            "TruthNovel-Bot"
+        }
       }
     );
 
-  console.log(
-    "GitHub save status:",
-    response.status
-  );
+  if (!response.ok) {
+
+    throw new Error(
+      `GitHub LOAD ERROR: ${response.status} ${await response.text()}`
+    );
+  }
+
+  const result =
+    await response.json();
+
+  const decoded =
+    atob(
+      result.content.replace(/\n/g, "")
+    );
+
+  const text =
+    new TextDecoder().decode(
+      Uint8Array.from(
+        decoded,
+        c => c.charCodeAt(0)
+      )
+    );
+
+  let data;
+
+  try {
+
+    data =
+      JSON.parse(text);
+
+  } catch {
+
+    data = {};
+  }
+
+  // التأكد من وجود users
+  if (!data.users) {
+    data.users = {};
+  }
+
+  // التأكد من وجود settings
+  if (!data.settings) {
+
+    data.settings = {
+      maintenance: false
+    };
+  }
+
+  if (
+    typeof data.settings.maintenance !==
+    "boolean"
+  ) {
+
+    data.settings.maintenance = false;
+  }
+
+  return {
+    data,
+    sha: result.sha
+  };
+}
+
+
+// ======================================================
+// GITHUB - SAVE DATA
+// ======================================================
+
+async function saveData(
+  env,
+  data,
+  sha
+) {
+
+  const url =
+    `https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`;
+
+  const json =
+    JSON.stringify(
+      data,
+      null,
+      2
+    );
+
+  const encoded =
+    btoa(
+      unescape(
+        encodeURIComponent(json)
+      )
+    );
+
+  const response =
+    await fetch(
+      url,
+      {
+        method: "PUT",
+
+        headers: {
+
+          "Authorization":
+            `Bearer ${env.GITHUB_TOKEN}`,
+
+          "Accept":
+            "application/vnd.github+json",
+
+          "Content-Type":
+            "application/json",
+
+          "X-GitHub-Api-Version":
+            "2022-11-28",
+
+          "User-Agent":
+            "TruthNovel-Bot"
+        },
+
+        body: JSON.stringify({
+
+          message:
+            "Update bot data",
+
+          content:
+            encoded,
+
+          sha:
+            sha
+        })
+      }
+    );
 
   if (!response.ok) {
 
@@ -288,42 +344,51 @@ async function saveData(
     );
 
     throw new Error(
-      `Failed to save data.json. GitHub ${response.status}: ` +
-      errorText.slice(0, 500)
+      `GitHub SAVE ERROR: ${response.status}`
     );
   }
+
+  return await response.json();
 }
 
-// =========================
-// Telegram
-// =========================
+
+// ======================================================
+// TELEGRAM SEND MESSAGE
+// ======================================================
 
 async function sendMessage(
+  env,
   chatId,
   text,
-  keyboard,
-  env
+  keyboard = null
 ) {
 
-  if (!env.TELEGRAM_BOT_TOKEN) {
-
-    throw new Error(
-      "TELEGRAM_BOT_TOKEN is missing"
-    );
-  }
+  const url =
+    `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`;
 
   const body = {
-    chat_id: chatId,
-    text: text
+
+    chat_id:
+      chatId,
+
+    text:
+      text,
+
+    parse_mode:
+      "HTML"
   };
 
   if (keyboard) {
-    body.reply_markup = keyboard;
+
+    body.reply_markup = {
+      inline_keyboard:
+        keyboard
+    };
   }
 
   const response =
     await fetch(
-      `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`,
+      url,
       {
         method: "POST",
 
@@ -347,91 +412,55 @@ async function sendMessage(
       response.status,
       errorText
     );
-
-    throw new Error(
-      `Telegram API error ${response.status}: ${errorText}`
-    );
   }
+
+  return response;
 }
 
-// =========================
-// Callback Answer
-// =========================
+
+// ======================================================
+// CALLBACK ANSWER
+// ======================================================
 
 async function answerCallback(
+  env,
   callbackId,
-  env
+  text = ""
 ) {
 
-  const response =
-    await fetch(
-      `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/answerCallbackQuery`,
-      {
-        method: "POST",
+  const url =
+    `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/answerCallbackQuery`;
 
-        headers: {
-          "Content-Type":
-            "application/json"
-        },
+  await fetch(
+    url,
+    {
+      method: "POST",
 
-        body:
-          JSON.stringify({
-            callback_query_id:
-              callbackId
-          })
-      }
-    );
+      headers: {
+        "Content-Type":
+          "application/json"
+      },
 
-  if (!response.ok) {
+      body:
+        JSON.stringify({
 
-    console.error(
-      "Telegram callback ERROR:",
-      response.status,
-      await response.text()
-    );
-  }
+          callback_query_id:
+            callbackId,
+
+          text:
+            text,
+
+          show_alert:
+            false
+        })
+    }
+  );
 }
 
-// =========================
-// Keyboards
-// =========================
 
-function typeKeyboard() {
-
-  return {
-
-    inline_keyboard: [
-
-      [
-        {
-          text: "📖 رواية",
-          callback_data: "type_رواية"
-        },
-
-        {
-          text: "🇯🇵 مانجا",
-          callback_data: "type_مانجا"
-        }
-      ],
-
-      [
-        {
-          text: "🇨🇳 مانها",
-          callback_data: "type_مانها"
-        },
-
-        {
-          text: "🇰🇷 مانهوا",
-          callback_data: "type_مانهوا"
-        }
-      ]
-    ]
-  };
-}
-
-// =========================
-// User
-// =========================
+// ======================================================
+// USER MANAGEMENT
+// ======================================================
 
 function ensureUser(
   data,
@@ -456,118 +485,132 @@ function ensureUser(
     return true;
   }
 
-  if (!data.users[userId].works) {
-    data.users[userId].works = [];
-  }
-
-  if (!("state" in data.users[userId])) {
-    data.users[userId].state = null;
-  }
-
-  if (!data.users[userId].first_seen) {
-    data.users[userId].first_seen =
-      Date.now();
-  }
-
-  if (!data.users[userId].last_active) {
-    data.users[userId].last_active =
-      Date.now();
-  }
-
   return false;
 }
 
-// =========================
-// Activity
-// =========================
 
-function updateActivity(user) {
+function updateActivity(
+  data,
+  userId
+) {
 
-  const now =
+  if (!data.users[userId]) {
+    ensureUser(data, userId);
+  }
+
+  data.users[userId].last_active =
     Date.now();
+}
 
-  const previous =
-    user.last_active || 0;
 
-  user.last_active =
-    now;
+// ======================================================
+// ADMIN CHECK
+// ======================================================
 
-  return (
-    now - previous >
-    5 * 60 * 1000
+function isAdmin(chatId) {
+
+  return String(chatId) ===
+    String(ADMIN_CHAT_ID);
+}
+
+
+// ======================================================
+// MAINTENANCE
+// ======================================================
+
+function isMaintenance(data) {
+
+  return Boolean(
+    data.settings &&
+    data.settings.maintenance
   );
 }
 
-// =========================
-// Maintenance
-// =========================
 
-function maintenanceMessage() {
+// ======================================================
+// MAIN MENU
+// ======================================================
 
-  return (
-    "🔧 البوت في وضع الصيانة حاليًا.\n\n" +
-    "نقوم بإجراء بعض التحديثات والتحسينات.\n" +
-    "⏳ سيعود للعمل بمجرد انتهاء الصيانة.\n\n" +
-    "شكرًا لصبركم ❤️"
-  );
+function mainKeyboard() {
+
+  return [
+
+    [
+      {
+        text: "➕ إضافة عمل",
+        callback_data: "add"
+      }
+    ],
+
+    [
+      {
+        text: "📚 أعمالي",
+        callback_data: "list"
+      }
+    ]
+
+  ];
 }
 
-// =========================
-// /start
-// =========================
+
+// ======================================================
+// START
+// ======================================================
 
 async function startCommand(
-  chatId,
+  message,
+  env,
   data,
-  sha,
-  env
+  sha
 ) {
 
   const userId =
-    String(chatId);
+    String(message.chat.id);
 
   ensureUser(
     data,
     userId
   );
 
-  await saveData(
+  updateActivity(
     data,
-    sha,
-    env
+    userId
+  );
+
+  await saveData(
+    env,
+    data,
+    sha
   );
 
   await sendMessage(
-    chatId,
+    env,
+    message.chat.id,
 
-    "👋 أهلاً بك!\n\n" +
+    "👋 <b>مرحبًا بك في TruthNovel Alert</b>\n\n" +
 
-    "📚 هذا البوت يسمح لك بإضافة الأعمال " +
-    "التي تريد مراقبتها.\n\n" +
+    "سأساعدك في مراقبة أعمالك وإعلامك عند صدور فصل جديد.\n\n" +
 
-    "/add — إضافة عمل\n" +
-
-    "/list — عرض أعمالك",
-
-    null,
-
-    env
+    "اختر أحد الخيارات من القائمة:",
+    
+    mainKeyboard()
   );
 }
 
-// =========================
-// /add
-// =========================
+
+// ======================================================
+// ADD WORK
+// ======================================================
 
 async function addCommand(
-  chatId,
+  message,
+  env,
   data,
-  sha,
-  env
+  sha
 ) {
 
   const userId =
-    String(chatId);
+    String(message.chat.id);
 
   ensureUser(
     data,
@@ -575,716 +618,123 @@ async function addCommand(
   );
 
   data.users[userId].state = {
-    step: "waiting_type"
+
+    step:
+      "waiting_name"
   };
 
-  await saveData(
+  updateActivity(
     data,
-    sha,
-    env
+    userId
+  );
+
+  await saveData(
+    env,
+    data,
+    sha
   );
 
   await sendMessage(
-    chatId,
+    env,
+    message.chat.id,
 
-    "📚 اختر نوع العمل:",
+    "📖 <b>إضافة عمل جديد</b>\n\n" +
 
-    typeKeyboard(),
-
-    env
+    "أرسل اسم الرواية أو العمل:"
   );
 }
 
-// =========================
-// /list
-// =========================
+
+// ======================================================
+// LIST WORKS
+// ======================================================
 
 async function listCommand(
-  chatId,
-  data,
-  env
+  message,
+  env,
+  data
 ) {
 
   const userId =
-    String(chatId);
+    String(message.chat.id);
 
-  ensureUser(
-    data,
-    userId
-  );
+  const user =
+    data.users[userId];
 
-  const works =
-    data.users[userId].works;
-
-  if (!works.length) {
-
-    await sendMessage(
-      chatId,
-
-      "📭 لا توجد أعمال مضافة حتى الآن.\n\n" +
-      "استخدم /add لإضافة عمل.",
-
-      null,
-
-      env
-    );
-
-    return;
-  }
-
-  const categories = {
-
-    "رواية": "📖 الروايات",
-    "مانجا": "🇯🇵 المانجا",
-    "مانها": "🇨🇳 المانها",
-    "مانهوا": "🇰🇷 المانهوا"
-  };
-
-  const lines = [
-    "📚 أعمالك:\n"
-  ];
-
-  for (
-    const type of Object.keys(categories)
+  if (
+    !user ||
+    !user.works ||
+    user.works.length === 0
   ) {
 
-    const selected =
-      works.filter(
-        work =>
-          work.type === type
-      );
-
-    if (!selected.length) {
-      continue;
-    }
-
-    lines.push("");
-    lines.push(categories[type]);
-
-    selected.forEach(
-      (work, index) => {
-
-        lines.push(
-          `${index + 1}. ${work.name} — الفصل ${work.last_chapter}`
-        );
-      }
-    );
-  }
-
-  const keyboard = {
-
-    inline_keyboard: [
-
-      [
-        {
-          text: "🗑️ إزالة من القائمة",
-          callback_data: "remove_menu"
-        }
-      ]
-    ]
-  };
-
-  await sendMessage(
-    chatId,
-
-    lines.join("\n"),
-
-    keyboard,
-
-    env
-  );
-}
-
-// =========================
-// Remove Menu
-// =========================
-
-async function removeMenu(
-  chatId,
-  data,
-  env
-) {
-
-  const userId =
-    String(chatId);
-
-  ensureUser(
-    data,
-    userId
-  );
-
-  const works =
-    data.users[userId].works;
-
-  if (!works.length) {
-
     await sendMessage(
-      chatId,
-      "📭 لا توجد أعمال لإزالتها.",
-      null,
-      env
+      env,
+      message.chat.id,
+
+      "📚 لا توجد أعمال مضافة إلى قائمتك حاليًا.\n\n" +
+      "اضغط ➕ إضافة عمل لإضافة أول عمل."
     );
 
     return;
   }
 
-  const keyboard = {
-    inline_keyboard: []
-  };
+  let text =
+    "📚 <b>أعمالك المراقبة:</b>\n\n";
 
-  works.forEach(
+  const keyboard = [];
+
+  user.works.forEach(
     (work, index) => {
 
-      keyboard.inline_keyboard.push(
-        [
-          {
-            text:
-              `🗑️ ${work.name}`,
+      text +=
+        `${index + 1}. <b>${escapeHtml(work.name)}</b>\n` +
 
-            callback_data:
-              `remove_${index}`
-          }
-        ]
-      );
-    }
-  );
+        `🔢 آخر فصل: ${work.last_chapter}\n` +
 
-  keyboard.inline_keyboard.push(
-    [
-      {
-        text: "❌ إلغاء",
-        callback_data: "remove_cancel"
-      }
-    ]
-  );
+        `🔗 ${escapeHtml(work.url)}\n\n`;
 
-  await sendMessage(
-    chatId,
+      keyboard.push([
 
-    "🗑️ اختر العمل الذي تريد إزالته:",
-
-    keyboard,
-
-    env
-  );
-}
-
-// =========================
-// Confirm Remove
-// =========================
-
-async function confirmRemove(
-  chatId,
-  index,
-  data,
-  env
-) {
-
-  const userId =
-    String(chatId);
-
-  ensureUser(
-    data,
-    userId
-  );
-
-  const works =
-    data.users[userId].works;
-
-  const work =
-    works[index];
-
-  if (!work) {
-
-    await sendMessage(
-      chatId,
-      "❌ هذا العمل لم يعد موجودًا.",
-      null,
-      env
-    );
-
-    return;
-  }
-
-  const keyboard = {
-
-    inline_keyboard: [
-
-      [
-        {
-          text: "✅ نعم، إزالة",
-          callback_data:
-            `confirm_remove_${index}`
-        },
-
-        {
-          text: "❌ إلغاء",
-          callback_data:
-            "remove_cancel"
-        }
-      ]
-    ]
-  };
-
-  await sendMessage(
-    chatId,
-
-    "⚠️ هل أنت متأكد من إزالة هذا العمل؟\n\n" +
-
-    `📖 ${work.name}\n` +
-
-    `🏷️ ${work.type}\n` +
-
-    `🔢 آخر فصل: ${work.last_chapter}`,
-
-    keyboard,
-
-    env
-  );
-}
-
-// =========================
-// Perform Remove
-// =========================
-
-async function performRemove(
-  chatId,
-  index,
-  data,
-  sha,
-  env
-) {
-
-  const userId =
-    String(chatId);
-
-  ensureUser(
-    data,
-    userId
-  );
-
-  const works =
-    data.users[userId].works;
-
-  const work =
-    works[index];
-
-  if (!work) {
-
-    await sendMessage(
-      chatId,
-      "❌ العمل غير موجود.",
-      null,
-      env
-    );
-
-    return;
-  }
-
-  const removedName =
-    work.name;
-
-  works.splice(
-    index,
-    1
-  );
-
-  await saveData(
-    data,
-    sha,
-    env
-  );
-
-  await sendMessage(
-    chatId,
-
-    "✅ تمت إزالة العمل بنجاح.\n\n" +
-    `🗑️ ${removedName}`,
-
-    null,
-
-    env
-  );
-}
-
-// =========================
-// Admin Keyboard
-// =========================
-
-function adminKeyboard(
-  maintenance
-) {
-
-  return {
-
-    inline_keyboard: [
-
-      [
-        {
-          text: "📊 الإحصائيات",
-          callback_data: "admin_stats"
-        },
-
-        {
-          text: "📚 الأعمال المراقبة",
-          callback_data: "admin_works"
-        }
-      ],
-
-      [
         {
           text:
-            maintenance
-              ? "🟢 إيقاف الصيانة"
-              : "🔧 تشغيل الصيانة",
+            `🗑️ حذف ${work.name}`,
 
           callback_data:
-            maintenance
-              ? "admin_maintenance_off"
-              : "admin_maintenance_on"
+            `remove_${index}`
         }
-      ]
-    ]
-  };
-}
 
-// =========================
-// Admin Panel
-// =========================
-
-async function adminPanel(
-  chatId,
-  data,
-  env
-) {
-
-  if (
-    String(chatId) !==
-    ADMIN_CHAT_ID
-  ) {
-    return;
-  }
-
-  const maintenance =
-    Boolean(
-      data.settings.maintenance
-    );
-
-  await sendMessage(
-    chatId,
-
-    "🛠️ لوحة تحكم المبرمج\n\n" +
-
-    `🔧 حالة الصيانة: ${
-      maintenance
-        ? "🟠 مفعّلة"
-        : "🟢 متوقفة"
-    }\n\n` +
-
-    "اختر ما تريد:",
-
-    adminKeyboard(
-      maintenance
-    ),
-
-    env
-  );
-}
-
-// =========================
-// Admin Stats
-// =========================
-
-async function adminStats(
-  chatId,
-  data,
-  env
-) {
-
-  if (
-    String(chatId) !==
-    ADMIN_CHAT_ID
-  ) {
-    return;
-  }
-
-  const users =
-    Object.values(
-      data.users
-    );
-
-  const totalUsers =
-    users.length;
-
-  const now =
-    Date.now();
-
-  const activeUsers =
-    users.filter(
-      user =>
-        user.last_active &&
-        now - user.last_active <=
-        ACTIVE_TIME
-    ).length;
-
-  let totalWorks = 0;
-
-  users.forEach(
-    user => {
-
-      totalWorks +=
-        Array.isArray(user.works)
-          ? user.works.length
-          : 0;
+      ]);
     }
   );
 
   await sendMessage(
-    chatId,
-
-    "📊 إحصائيات البوت\n\n" +
-
-    `👥 إجمالي المستخدمين: ${totalUsers}\n` +
-
-    `🟢 المستخدمون النشطون الآن: ${activeUsers}\n` +
-
-    `📚 إجمالي الأعمال المراقبة: ${totalWorks}\n\n` +
-
-    `🔧 الصيانة: ${
-      data.settings.maintenance
-        ? "🟠 مفعّلة"
-        : "🟢 متوقفة"
-    }`,
-
-    {
-      inline_keyboard: [
-
-        [
-          {
-            text: "🔙 لوحة المبرمج",
-            callback_data:
-              "admin_panel"
-          }
-        ]
-      ]
-    },
-
-    env
+    env,
+    message.chat.id,
+    text,
+    keyboard
   );
 }
 
-// =========================
-// Admin Works
-// =========================
 
-async function adminWorks(
-  chatId,
-  data,
-  env
-) {
-
-  if (
-    String(chatId) !==
-    ADMIN_CHAT_ID
-  ) {
-    return;
-  }
-
-  const lines = [
-    "📚 جميع الأعمال التي يراقبها البوت\n"
-  ];
-
-  let totalWorks = 0;
-
-  const users =
-    Object.entries(
-      data.users
-    );
-
-  users.forEach(
-    ([userId, user]) => {
-
-      const works =
-        user.works || [];
-
-      works.forEach(
-        work => {
-
-          totalWorks++;
-
-          lines.push(
-            `${totalWorks}. ${work.name}`
-          );
-
-          lines.push(
-            `🏷️ النوع: ${work.type}`
-          );
-
-          lines.push(
-            `🔢 آخر فصل: ${work.last_chapter}`
-          );
-
-          lines.push(
-            `🔗 الرابط: ${work.url}`
-          );
-
-          lines.push(
-            `👤 المستخدم: ${userId}`
-          );
-
-          lines.push("");
-        }
-      );
-    }
-  );
-
-  if (!totalWorks) {
-
-    lines.push(
-      "📭 لا توجد أعمال مراقبة حاليًا."
-    );
-  }
-
-  await sendMessage(
-    chatId,
-
-    lines.join("\n"),
-
-    {
-      inline_keyboard: [
-
-        [
-          {
-            text: "🔙 لوحة المبرمج",
-            callback_data:
-              "admin_panel"
-          }
-        ]
-      ]
-    },
-
-    env
-  );
-}
-
-// =========================
-// Broadcast Maintenance
-// =========================
-
-async function broadcastMaintenance(
-  data,
-  env
-) {
-
-  const users =
-    Object.keys(
-      data.users
-    );
-
-  for (
-    const userId of users
-  ) {
-
-    try {
-
-      await sendMessage(
-        userId,
-
-        maintenanceMessage(),
-
-        null,
-
-        env
-      );
-
-    } catch (error) {
-
-      console.error(
-        "Maintenance broadcast error:",
-        userId,
-        error
-      );
-    }
-  }
-}
-
-// =========================
-// Toggle Maintenance
-// =========================
-
-async function setMaintenance(
-  chatId,
-  enabled,
-  data,
-  sha,
-  env
-) {
-
-  if (
-    String(chatId) !==
-    ADMIN_CHAT_ID
-  ) {
-    return;
-  }
-
-  data.settings.maintenance =
-    enabled;
-
-  await saveData(
-    data,
-    sha,
-    env
-  );
-
-  if (enabled) {
-
-    await broadcastMaintenance(
-      data,
-      env
-    );
-  }
-
-  await sendMessage(
-    chatId,
-
-    enabled
-
-      ? "🔧 تم تشغيل وضع الصيانة.\n\n" +
-        "📢 تم إرسال إشعار للمستخدمين."
-
-      : "🟢 تم إيقاف وضع الصيانة.\n\n" +
-        "✅ البوت عاد للعمل.",
-
-    adminKeyboard(
-      enabled
-    ),
-
-    env
-  );
-}
-
-// =========================
-// Callback
-// =========================
+// ======================================================
+// CALLBACK HANDLER
+// ======================================================
 
 async function handleCallback(
   update,
   env
 ) {
 
-  const query =
+  const callback =
     update.callback_query;
 
   const chatId =
-    query.message.chat.id;
+    String(
+      callback.message.chat.id
+    );
 
-  const userId =
-    String(chatId);
-
-  await answerCallback(
-    query.id,
-    env
-  );
+  const action =
+    callback.data;
 
   const {
     data,
@@ -1292,281 +742,362 @@ async function handleCallback(
   } =
     await loadData(env);
 
-  const isNewUser =
-    ensureUser(
-      data,
-      userId
+  ensureUser(
+    data,
+    chatId
+  );
+
+  updateActivity(
+    data,
+    chatId
+  );
+
+  // ==========================================
+  // ADD
+  // ==========================================
+
+  if (action === "add") {
+
+    await answerCallback(
+      env,
+      callback.id
     );
 
-  const user =
-    data.users[userId];
+    data.users[chatId].state = {
+      step: "waiting_name"
+    };
 
-  const isAdmin =
-    userId ===
-    ADMIN_CHAT_ID;
-
-  const shouldSaveActivity =
-    updateActivity(user);
-
-  // =========================
-  // Maintenance
-  // =========================
-
-  if (
-    data.settings.maintenance &&
-    !isAdmin
-  ) {
+    await saveData(
+      env,
+      data,
+      sha
+    );
 
     await sendMessage(
+      env,
       chatId,
-      maintenanceMessage(),
-      null,
-      env
+
+      "📖 <b>إضافة عمل جديد</b>\n\n" +
+      "أرسل اسم الرواية أو العمل:"
     );
 
     return;
   }
 
-  // =========================
-  // Admin
-  // =========================
+
+  // ==========================================
+  // LIST
+  // ==========================================
+
+  if (action === "list") {
+
+    await answerCallback(
+      env,
+      callback.id
+    );
+
+    await listCommand(
+      callback.message,
+      env,
+      data
+    );
+
+    return;
+  }
+
+
+  // ==========================================
+  // REMOVE
+  // ==========================================
 
   if (
-    query.data ===
-    "admin_panel"
+    action.startsWith("remove_")
   ) {
 
-    if (!isAdmin) return;
+    const index =
+      Number(
+        action.split("_")[1]
+      );
+
+    const user =
+      data.users[chatId];
+
+    if (
+      !user ||
+      !user.works ||
+      !user.works[index]
+    ) {
+
+      await answerCallback(
+        env,
+        callback.id,
+        "العمل غير موجود."
+      );
+
+      return;
+    }
+
+    const work =
+      user.works[index];
+
+    await answerCallback(
+      env,
+      callback.id
+    );
+
+    await sendMessage(
+      env,
+      chatId,
+
+      `⚠️ هل أنت متأكد من حذف:\n\n` +
+      `<b>${escapeHtml(work.name)}</b>\n\n` +
+      `سيتم إزالته من قائمتك فقط.`,
+
+      [
+
+        [
+          {
+            text: "✅ نعم، احذف",
+            callback_data:
+              `confirm_remove_${index}`
+          },
+
+          {
+            text: "❌ إلغاء",
+            callback_data:
+              "cancel_remove"
+          }
+        ]
+
+      ]
+    );
+
+    return;
+  }
+
+
+  // ==========================================
+  // CONFIRM REMOVE
+  // ==========================================
+
+  if (
+    action.startsWith("confirm_remove_")
+  ) {
+
+    const index =
+      Number(
+        action.split("_")[2]
+      );
+
+    const user =
+      data.users[chatId];
+
+    if (
+      !user ||
+      !user.works ||
+      !user.works[index]
+    ) {
+
+      await answerCallback(
+        env,
+        callback.id,
+        "العمل غير موجود."
+      );
+
+      return;
+    }
+
+    const removed =
+      user.works.splice(
+        index,
+        1
+      )[0];
+
+    await saveData(
+      env,
+      data,
+      sha
+    );
+
+    await answerCallback(
+      env,
+      callback.id,
+      "تم حذف العمل."
+    );
+
+    await sendMessage(
+      env,
+      chatId,
+
+      `🗑️ تم حذف <b>${escapeHtml(removed.name)}</b> من قائمتك.`
+    );
+
+    return;
+  }
+
+
+  // ==========================================
+  // CANCEL REMOVE
+  // ==========================================
+
+  if (
+    action === "cancel_remove"
+  ) {
+
+    await answerCallback(
+      env,
+      callback.id,
+      "تم الإلغاء."
+    );
+
+    await sendMessage(
+      env,
+      chatId,
+      "❌ تم إلغاء عملية الحذف."
+    );
+
+    return;
+  }
+
+
+  // ==========================================
+  // ADMIN PANEL
+  // ==========================================
+
+  if (
+    action === "admin_panel"
+  ) {
+
+    if (!isAdmin(chatId)) {
+
+      await answerCallback(
+        env,
+        callback.id,
+        "غير مصرح."
+      );
+
+      return;
+    }
+
+    await answerCallback(
+      env,
+      callback.id
+    );
 
     await adminPanel(
       chatId,
-      data,
-      env
+      env,
+      data
     );
 
     return;
   }
 
-  if (
-    query.data ===
-    "admin_stats"
-  ) {
 
-    if (!isAdmin) return;
-
-    await adminStats(
-      chatId,
-      data,
-      env
-    );
-
-    return;
-  }
+  // ==========================================
+  // MAINTENANCE ON/OFF
+  // ==========================================
 
   if (
-    query.data ===
-    "admin_works"
+    action === "maintenance_on" ||
+    action === "maintenance_off"
   ) {
 
-    if (!isAdmin) return;
+    if (!isAdmin(chatId)) {
 
-    await adminWorks(
-      chatId,
-      data,
-      env
-    );
-
-    return;
-  }
-
-  if (
-    query.data ===
-    "admin_maintenance_on"
-  ) {
-
-    if (!isAdmin) return;
-
-    await setMaintenance(
-      chatId,
-      true,
-      data,
-      sha,
-      env
-    );
-
-    return;
-  }
-
-  if (
-    query.data ===
-    "admin_maintenance_off"
-  ) {
-
-    if (!isAdmin) return;
-
-    await setMaintenance(
-      chatId,
-      false,
-      data,
-      sha,
-      env
-    );
-
-    return;
-  }
-
-  // =========================
-  // Remove Menu
-  // =========================
-
-  if (
-    query.data ===
-    "remove_menu"
-  ) {
-
-    await removeMenu(
-      chatId,
-      data,
-      env
-    );
-
-    return;
-  }
-
-  // =========================
-  // Remove Cancel
-  // =========================
-
-  if (
-    query.data ===
-    "remove_cancel"
-  ) {
-
-    await sendMessage(
-      chatId,
-
-      "❌ تم إلغاء عملية الإزالة.",
-
-      null,
-
-      env
-    );
-
-    return;
-  }
-
-  // =========================
-  // Confirm removal
-  // =========================
-
-  if (
-    query.data.startsWith(
-      "confirm_remove_"
-    )
-  ) {
-
-    const index =
-      Number(
-        query.data.replace(
-          "confirm_remove_",
-          ""
-        )
+      await answerCallback(
+        env,
+        callback.id,
+        "غير مصرح."
       );
 
+      return;
+    }
+
+    data.settings.maintenance =
+      action === "maintenance_on";
+
+    await saveData(
+      env,
+      data,
+      sha
+    );
+
+    await answerCallback(
+      env,
+      callback.id
+    );
+
     if (
-      Number.isInteger(index)
+      data.settings.maintenance
     ) {
 
-      await performRemove(
+      await broadcastMaintenance(
+        env,
+        data
+      );
+
+      await sendMessage(
+        env,
         chatId,
-        index,
-        data,
-        sha,
-        env
+
+        "🔴 <b>تم تفعيل وضع الصيانة.</b>\n\n" +
+        "المستخدمون العاديون لن يتمكنوا من استخدام البوت حتى إيقاف الصيانة."
+      );
+
+    } else {
+
+      await sendMessage(
+        env,
+        chatId,
+
+        "🟢 <b>تم إيقاف وضع الصيانة.</b>\n\n" +
+        "عاد البوت للعمل للمستخدمين."
       );
     }
 
     return;
   }
 
-  // =========================
-  // Remove selection
-  // =========================
+
+  // ==========================================
+  // ADMIN WORKS
+  // ==========================================
 
   if (
-    query.data.startsWith(
-      "remove_"
-    )
+    action === "admin_works"
   ) {
 
-    const index =
-      Number(
-        query.data.replace(
-          "remove_",
-          ""
-        )
+    if (!isAdmin(chatId)) {
+
+      await answerCallback(
+        env,
+        callback.id,
+        "غير مصرح."
       );
 
-    if (
-      Number.isInteger(index)
-    ) {
-
-      await confirmRemove(
-        chatId,
-        index,
-        data,
-        env
-      );
+      return;
     }
 
-    return;
-  }
-
-  // =========================
-  // Type selection
-  // =========================
-
-  if (
-    !query.data.startsWith(
-      "type_"
-    )
-  ) {
-
-    return;
-  }
-
-  const workType =
-    query.data.replace(
-      "type_",
-      ""
+    await answerCallback(
+      env,
+      callback.id
     );
 
-  data.users[userId].state = {
-    step: "waiting_name",
-    type: workType
-  };
+    await showAllWorks(
+      chatId,
+      env,
+      data
+    );
 
-  await saveData(
-    data,
-    sha,
-    env
-  );
-
-  await sendMessage(
-    chatId,
-
-    `✅ تم اختيار: ${workType}\n\n` +
-    "✏️ الآن أرسل اسم العمل:",
-
-    null,
-
-    env
-  );
+    return;
+  }
 }
 
-// =========================
-// Message
-// =========================
+
+// ======================================================
+// MESSAGE HANDLER
+// ======================================================
 
 async function handleMessage(
   message,
@@ -1574,21 +1105,10 @@ async function handleMessage(
 ) {
 
   const chatId =
-    message.chat.id;
-
-  const userId =
-    String(chatId);
-
-  const isAdmin =
-    userId ===
-    ADMIN_CHAT_ID;
+    String(message.chat.id);
 
   const text =
     (message.text || "").trim();
-
-  // =========================
-  // Load
-  // =========================
 
   const {
     data,
@@ -1596,36 +1116,44 @@ async function handleMessage(
   } =
     await loadData(env);
 
+  const isAdminUser =
+    isAdmin(chatId);
+
   const isNewUser =
     ensureUser(
       data,
-      userId
+      chatId
     );
 
-  const user =
-    data.users[userId];
+  // ==========================================
+  // COMMANDS
+  // ==========================================
 
-  const shouldSaveActivity =
-    updateActivity(user);
+  if (
+    text === "/start"
+  ) {
 
-  // =========================
-  // Admin
-  // =========================
+    await startCommand(
+      message,
+      env,
+      data,
+      sha
+    );
+
+    return;
+  }
+
 
   if (
     text === "/admin"
   ) {
 
-    if (!isAdmin) {
+    if (!isAdminUser) {
 
       await sendMessage(
+        env,
         chatId,
-
-        "❌ هذا الأمر غير متاح.",
-
-        null,
-
-        env
+        "⛔ هذا الأمر متاح للمبرمج فقط."
       );
 
       return;
@@ -1633,289 +1161,301 @@ async function handleMessage(
 
     await adminPanel(
       chatId,
-      data,
-      env
+      env,
+      data
     );
 
     return;
   }
 
-  // =========================
-  // Maintenance
-  // =========================
+
+  // ==========================================
+  // MAINTENANCE
+  // ==========================================
 
   if (
-    data.settings.maintenance &&
-    !isAdmin
+    isMaintenance(data) &&
+    !isAdminUser
   ) {
 
     await sendMessage(
+      env,
       chatId,
 
-      maintenanceMessage(),
-
-      null,
-
-      env
+      "🔧 <b>البوت في وضع الصيانة حاليًا.</b>\n\n" +
+      "يرجى المحاولة مرة أخرى لاحقًا."
     );
 
     return;
   }
 
-  // =========================
-  // /start
-  // =========================
 
-  if (
-    text === "/start"
-  ) {
+  // ==========================================
+  // ACTIVITY
+  // ==========================================
 
-    await startCommand(
-      chatId,
-      data,
-      sha,
-      env
-    );
+  const now =
+    Date.now();
 
-    return;
-  }
+  const previousActivity =
+    data.users[chatId].last_active || 0;
 
-  // =========================
-  // /add
-  // =========================
+  const shouldSaveActivity =
+    now - previousActivity >
+    ACTIVE_TIME;
+
+  updateActivity(
+    data,
+    chatId
+  );
+
+
+  // ==========================================
+  // ADD
+  // ==========================================
 
   if (
     text === "/add"
   ) {
 
     await addCommand(
-      chatId,
+      message,
+      env,
       data,
-      sha,
-      env
+      sha
     );
 
     return;
   }
 
-  // =========================
-  // /list
-  // =========================
+
+  // ==========================================
+  // LIST
+  // ==========================================
 
   if (
     text === "/list"
   ) {
 
+    if (shouldSaveActivity) {
+
+      await saveData(
+        env,
+        data,
+        sha
+      );
+    }
+
     await listCommand(
-      chatId,
-      data,
-      env
+      message,
+      env,
+      data
     );
 
     return;
   }
 
-  // =========================
-  // Save new user/activity
-  // =========================
+
+  // ==========================================
+  // ADMIN COMMAND
+  // ==========================================
 
   if (
-    isNewUser ||
-    shouldSaveActivity
+    text === "/admin"
   ) {
 
-    await saveData(
-      data,
-      sha,
-      env
+    return;
+  }
+
+
+  // ==========================================
+  // USER STATE
+  // ==========================================
+
+  const user =
+    data.users[chatId];
+
+  if (
+    !user.state
+  ) {
+
+    if (shouldSaveActivity) {
+
+      await saveData(
+        env,
+        data,
+        sha
+      );
+    }
+
+    await sendMessage(
+      env,
+      chatId,
+
+      "اختر أمرًا من القائمة 👇",
+
+      mainKeyboard()
     );
 
     return;
   }
 
-  // =========================
-  // State
-  // =========================
 
-  const state =
-    user.state;
-
-  if (!state) {
-    return;
-  }
-
-  // =========================
-  // Name
-  // =========================
+  // ==========================================
+  // WAITING FOR NAME
+  // ==========================================
 
   if (
-    state.step ===
+    user.state.step ===
     "waiting_name"
   ) {
 
-    state.name =
-      text;
+    user.state = {
 
-    state.step =
-      "waiting_url";
+      step:
+        "waiting_url",
+
+      name:
+        text
+    };
 
     await saveData(
+      env,
       data,
-      sha,
-      env
+      sha
     );
 
     await sendMessage(
+      env,
       chatId,
 
-      "🔗 أرسل الآن رابط العمل أو الصفحة " +
-      "التي تريد مراقبتها:",
-
-      null,
-
-      env
+      "🔗 الآن أرسل رابط صفحة العمل."
     );
 
     return;
   }
 
-  // =========================
-  // URL
-  // =========================
+
+  // ==========================================
+  // WAITING FOR URL
+  // ==========================================
 
   if (
-    state.step ===
+    user.state.step ===
     "waiting_url"
   ) {
 
+    const url =
+      text;
+
     if (
-      !/^https?:\/\//i.test(text)
+      !/^https?:\/\/\S+$/i.test(url)
     ) {
 
       await sendMessage(
+        env,
         chatId,
 
         "❌ الرابط غير صحيح.\n\n" +
-        "يجب أن يبدأ بـ https:// أو http://\n\n" +
-        "🔗 أرسل الرابط مرة أخرى:",
-
-        null,
-
-        env
+        "أرسل رابطًا يبدأ بـ <b>http://</b> أو <b>https://</b>."
       );
 
       return;
     }
 
-    await sendMessage(
-      chatId,
-
-      "🔍 جارٍ فحص الرابط...",
-
-      null,
-
-      env
-    );
-
+    // محاولة التأكد من أن الرابط يعمل
     try {
 
       const response =
         await fetch(
-          text,
+          url,
           {
-            method: "GET",
-
-            headers: {
-              "User-Agent":
-                "Mozilla/5.0"
-            }
+            method: "GET"
           }
         );
 
-      if (!response.ok) {
-        throw new Error(
-          "URL unavailable"
+      if (
+        !response.ok
+      ) {
+
+        await sendMessage(
+          env,
+          chatId,
+
+          "⚠️ تمكنت من الوصول إلى الرابط لكن الموقع أعاد حالة غير طبيعية.\n\n" +
+          "إذا كنت متأكدًا من الرابط، أرسله مرة أخرى."
         );
+
+        return;
       }
 
     } catch {
 
       await sendMessage(
+        env,
         chatId,
 
-        "❌ لا أستطيع الوصول إلى هذا الرابط.\n\n" +
-        "تأكد من أن الرابط صحيح ويمكن الوصول إليه.",
-
-        null,
-
-        env
+        "⚠️ لم أتمكن من الوصول إلى الرابط.\n\n" +
+        "تأكد من أن الرابط صحيح ويمكن فتحه."
       );
 
       return;
     }
 
-    state.url =
-      text;
+    user.state = {
 
-    state.step =
-      "waiting_chapter";
+      step:
+        "waiting_chapter",
+
+      name:
+        user.state.name,
+
+      url:
+        url
+    };
 
     await saveData(
+      env,
       data,
-      sha,
-      env
+      sha
     );
 
     await sendMessage(
+      env,
       chatId,
 
-      "✅ تمكنت من الوصول إلى الصفحة بنجاح!\n\n" +
-
-      `📖 الاسم: ${state.name}\n` +
-
-      `🏷️ النوع: ${state.type}\n\n` +
-
-      "🔢 أرسل الآن رقم آخر فصل صدر حاليًا:",
-
-      null,
-
-      env
+      "🔢 ممتاز.\n\n" +
+      "أرسل رقم آخر فصل صدر حاليًا.\n\n" +
+      "مثال: <b>125</b>"
     );
 
     return;
   }
 
-  // =========================
-  // Chapter
-  // =========================
+
+  // ==========================================
+  // WAITING FOR CHAPTER
+  // ==========================================
 
   if (
-    state.step ===
+    user.state.step ===
     "waiting_chapter"
   ) {
 
     const chapter =
-      Number(
-        text.replace(
-          /[^\d.]/g,
-          ""
-        )
-      );
+      Number(text);
 
     if (
-      !Number.isFinite(chapter) ||
+      !Number.isInteger(chapter) ||
       chapter < 0
     ) {
 
       await sendMessage(
+        env,
         chatId,
 
-        "❌ رقم الفصل غير صحيح.\n\n" +
-        "🔢 أرسل رقم آخر فصل صدر حاليًا:",
-
-        null,
-
-        env
+        "❌ أرسل رقم فصل صحيح.\n\n" +
+        "مثال: <b>125</b>"
       );
 
       return;
@@ -1924,45 +1464,315 @@ async function handleMessage(
     user.works.push({
 
       type:
-        state.type,
+        "novel",
 
       name:
-        state.name,
+        user.state.name,
 
       url:
-        state.url,
+        user.state.url,
 
       last_chapter:
         chapter
     });
 
+    const workName =
+      user.state.name;
+
     user.state =
       null;
 
     await saveData(
+      env,
       data,
-      sha,
-      env
+      sha
     );
 
     await sendMessage(
+      env,
       chatId,
 
-      "✅ تمت إضافة العمل بنجاح!\n\n" +
+      `✅ <b>تمت إضافة العمل بنجاح!</b>\n\n` +
 
-      `📖 ${state.name}\n` +
-
-      `🏷️ ${state.type}\n` +
+      `📖 ${escapeHtml(workName)}\n` +
 
       `🔢 آخر فصل: ${chapter}\n\n` +
 
-      "📚 يمكنك استخدام /list لعرض أعمالك.",
-
-      null,
-
-      env
+      `سأحتفظ به ضمن قائمتك.`
     );
 
     return;
   }
+
+
+  // ==========================================
+  // SAVE ACTIVITY
+  // ==========================================
+
+  if (
+    shouldSaveActivity
+  ) {
+
+    await saveData(
+      env,
+      data,
+      sha
+    );
+  }
+}
+
+
+// ======================================================
+// ADMIN PANEL
+// ======================================================
+
+async function adminPanel(
+  chatId,
+  env,
+  data
+) {
+
+  if (!isAdmin(chatId)) {
+
+    return;
+  }
+
+  const users =
+    Object.keys(
+      data.users || {}
+    );
+
+  const now =
+    Date.now();
+
+  let activeUsers =
+    0;
+
+  let totalWorks =
+    0;
+
+  users.forEach(
+    userId => {
+
+      const user =
+        data.users[userId];
+
+      if (!user) {
+        return;
+      }
+
+      if (
+        now -
+        (user.last_active || 0)
+        <=
+        ACTIVE_TIME
+      ) {
+
+        activeUsers++;
+      }
+
+      totalWorks +=
+        Array.isArray(user.works)
+          ? user.works.length
+          : 0;
+    }
+  );
+
+  const maintenance =
+    isMaintenance(data);
+
+  const text =
+
+    "🛠️ <b>لوحة تحكم TruthNovel</b>\n\n" +
+
+    `👥 إجمالي المستخدمين: <b>${users.length}</b>\n` +
+
+    `🟢 المستخدمون النشطون: <b>${activeUsers}</b>\n` +
+
+    `📚 إجمالي الأعمال المراقبة: <b>${totalWorks}</b>\n\n` +
+
+    `🔧 وضع الصيانة: <b>${maintenance ? "🔴 مفعّل" : "🟢 متوقف"}</b>`;
+
+  await sendMessage(
+    env,
+    chatId,
+    text,
+
+    [
+
+      [
+        {
+          text: "📚 جميع الأعمال",
+          callback_data:
+            "admin_works"
+        }
+      ],
+
+      [
+
+        {
+          text:
+            maintenance
+              ? "🟢 إيقاف الصيانة"
+              : "🔴 تفعيل الصيانة",
+
+          callback_data:
+            maintenance
+              ? "maintenance_off"
+              : "maintenance_on"
+        }
+
+      ]
+
+    ]
+  );
+}
+
+
+// ======================================================
+// SHOW ALL WORKS
+// ======================================================
+
+async function showAllWorks(
+  chatId,
+  env,
+  data
+) {
+
+  let text =
+    "📚 <b>جميع الأعمال المراقبة</b>\n\n";
+
+  let total =
+    0;
+
+  for (
+    const userId of
+    Object.keys(data.users || {})
+  ) {
+
+    const user =
+      data.users[userId];
+
+    if (
+      !user ||
+      !Array.isArray(user.works)
+    ) {
+      continue;
+    }
+
+    for (
+      const work of user.works
+    ) {
+
+      total++;
+
+      text +=
+
+        `👤 <b>المستخدم:</b> ${escapeHtml(userId)}\n` +
+
+        `📖 <b>الاسم:</b> ${escapeHtml(work.name)}\n` +
+
+        `🏷️ <b>النوع:</b> ${escapeHtml(work.type || "novel")}\n` +
+
+        `🔢 <b>آخر فصل:</b> ${work.last_chapter}\n` +
+
+        `🔗 <b>الرابط:</b> ${escapeHtml(work.url)}\n\n` +
+
+        "━━━━━━━━━━━━━━\n\n";
+    }
+  }
+
+  if (total === 0) {
+
+    text +=
+      "لا توجد أعمال مراقبة حاليًا.";
+
+  } else {
+
+    text +=
+      `📊 <b>الإجمالي: ${total}</b>`;
+  }
+
+  await sendMessage(
+    env,
+    chatId,
+    text
+  );
+}
+
+
+// ======================================================
+// MAINTENANCE BROADCAST
+// ======================================================
+
+async function broadcastMaintenance(
+  env,
+  data
+) {
+
+  const message =
+
+    "🔧 <b>تنبيه صيانة</b>\n\n" +
+
+    "تم تفعيل وضع الصيانة في TruthNovel Alert.\n\n" +
+
+    "لن تتمكن من استخدام البوت مؤقتًا حتى انتهاء الصيانة.";
+
+  for (
+    const userId of
+    Object.keys(data.users || {})
+  ) {
+
+    if (
+      String(userId) ===
+      String(ADMIN_CHAT_ID)
+    ) {
+      continue;
+    }
+
+    try {
+
+      await sendMessage(
+        env,
+        userId,
+        message
+      );
+
+    } catch (error) {
+
+      console.error(
+        "Broadcast error:",
+        userId,
+        error
+      );
+    }
+  }
+}
+
+
+// ======================================================
+// ESCAPE HTML
+// ======================================================
+
+function escapeHtml(
+  text
+) {
+
+  return String(text)
+    .replace(
+      /&/g,
+      "&amp;"
+    )
+    .replace(
+      /</g,
+      "&lt;"
+    )
+    .replace(
+      />/g,
+      "&gt;"
+    )
+    .replace(
+      /"/g,
+      "&quot;"
+    );
 }
