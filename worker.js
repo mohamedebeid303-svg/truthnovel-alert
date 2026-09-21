@@ -1444,11 +1444,13 @@ async function handleMessage(
       sha
     );
 
+    // استخدام النوع الذي اختاره المستخدم
+    // داخل رسالة طلب الرابط
     await sendMessage(
       env,
       chatId,
 
-      "🔗 الآن أرسل رابط صفحة العمل."
+      `🔗 الآن أرسل رابط صفحة ${escapeHtml(user.state.type)}.`
     );
 
     return;
@@ -1932,4 +1934,4 @@ function escapeHtml(
       /"/g,
       "&quot;"
     );
-}
+} 
