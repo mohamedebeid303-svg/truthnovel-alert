@@ -9,7 +9,9 @@
           "last_chapter": 2454
         }
       ],
-      "state": null
+      "state": null,
+      "first_seen": 1790025835463,
+      "last_active": 1790025835463
     },
     "5794991077": {
       "works": [],
@@ -19,5 +21,8 @@
         "name": "Solo Leveling: Ragnarok"
       }
     }
+  },
+  "settings": {
+    "maintenance": false
   }
 }
