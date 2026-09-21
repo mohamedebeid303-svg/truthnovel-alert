@@ -16,12 +16,10 @@
         }
       ],
       "state": {
-        "step": "waiting_url",
-        "type": "رواية",
-        "name": "838eueuu"
+        "step": "waiting_type"
       },
       "first_seen": 1790025835463,
-      "last_active": 1790032562821
+      "last_active": 1790032565394
     },
     "2057656653": {
       "works": [],
