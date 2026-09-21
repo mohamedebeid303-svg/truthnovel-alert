@@ -103,7 +103,7 @@ async function ensureBotCommands(env) {
 
         body: JSON.stringify({
 
-          commands: commands,
+          commands,
 
           scope: {
             type: "default"
@@ -137,9 +137,7 @@ async function ensureBotCommands(env) {
 
           scope: {
             type: "chat",
-
-            chat_id:
-              Number(ADMIN_CHAT_ID)
+            chat_id: Number(ADMIN_CHAT_ID)
           }
         })
       }
@@ -223,6 +221,7 @@ async function loadData(env) {
   }
 
   if (!data.users) {
+
     data.users = {};
   }
 
@@ -307,8 +306,7 @@ async function saveData(
           content:
             encoded,
 
-          sha:
-            sha
+          sha
         })
       }
     );
@@ -334,34 +332,14 @@ async function saveData(
 
 
 // ======================================================
-// DELETE PREVIOUS BOT MESSAGE
+// DELETE MESSAGE
 // ======================================================
 
-async function deletePreviousBotMessage(
+async function deleteMessage(
   env,
   chatId,
-  data
+  messageId
 ) {
-
-  // لا نحذف أي رسالة تلقائيًا من حساب المبرمج
-  if (
-    String(chatId) ===
-    String(ADMIN_CHAT_ID)
-  ) {
-
-    return;
-  }
-
-  const user =
-    data.users &&
-    data.users[String(chatId)];
-
-  if (!user) {
-    return;
-  }
-
-  const messageId =
-    user.last_bot_message_id;
 
   if (!messageId) {
     return;
@@ -383,15 +361,14 @@ async function deletePreviousBotMessage(
               "application/json"
           },
 
-          body:
-            JSON.stringify({
+          body: JSON.stringify({
 
-              chat_id:
-                chatId,
+            chat_id:
+              chatId,
 
-              message_id:
-                messageId
-            })
+            message_id:
+              messageId
+          })
         }
       );
 
@@ -410,6 +387,38 @@ async function deletePreviousBotMessage(
       error
     );
   }
+}
+
+
+// ======================================================
+// DELETE PREVIOUS NORMAL BOT MESSAGE
+// ======================================================
+
+async function deletePreviousBotMessage(
+  env,
+  chatId,
+  data
+) {
+
+  const user =
+    data.users[String(chatId)];
+
+  if (!user) {
+    return;
+  }
+
+  const messageId =
+    user.last_bot_message_id;
+
+  if (!messageId) {
+    return;
+  }
+
+  await deleteMessage(
+    env,
+    chatId,
+    messageId
+  );
 
   user.last_bot_message_id =
     null;
@@ -419,22 +428,29 @@ async function deletePreviousBotMessage(
 // ======================================================
 // TELEGRAM SEND MESSAGE
 // ======================================================
+//
+// إذا تم تمرير data:
+// الرسالة تعتبر رسالة عادية للمستخدم
+// وسيتم حذف الرسالة العادية السابقة.
+//
+// إذا لم يتم تمرير data:
+// الرسالة تعتبر رسالة إدارية/نظامية
+// ولن تدخل في نظام الحذف.
+//
+// ======================================================
 
 async function sendMessage(
   env,
   chatId,
   text,
   keyboard = null,
-  data = null,
-  saveMessage = true
+  data = null
 ) {
 
-  // حذف الرسالة السابقة للمستخدم العادي
-  if (
-    data &&
-    String(chatId) !==
-    String(ADMIN_CHAT_ID)
-  ) {
+  const isNormalMessage =
+    data !== null;
+
+  if (isNormalMessage) {
 
     await deletePreviousBotMessage(
       env,
@@ -461,6 +477,7 @@ async function sendMessage(
   if (keyboard) {
 
     body.reply_markup = {
+
       inline_keyboard:
         keyboard
     };
@@ -484,13 +501,10 @@ async function sendMessage(
 
   if (!response.ok) {
 
-    const errorText =
-      await response.text();
-
     console.error(
       "Telegram sendMessage ERROR:",
       response.status,
-      errorText
+      await response.text()
     );
 
     return null;
@@ -508,36 +522,23 @@ async function sendMessage(
     return null;
   }
 
-  // حفظ رقم آخر رسالة أرسلها البوت للمستخدم العادي
+  // حفظ ID الرسالة العادية فقط
   if (
-    saveMessage &&
-    data &&
+    isNormalMessage &&
+    result &&
     result.ok &&
     result.result &&
-    result.result.message_id &&
-    String(chatId) !==
-      String(ADMIN_CHAT_ID)
+    result.result.message_id
   ) {
 
-    if (!data.users[String(chatId)]) {
+    const user =
+      data.users[String(chatId)];
 
-      data.users[String(chatId)] = {
+    if (user) {
 
-        works: [],
-
-        state: null,
-
-        first_seen:
-          Date.now(),
-
-        last_active:
-          Date.now()
-      };
-    }
-
-    data.users[String(chatId)]
-      .last_bot_message_id =
+      user.last_bot_message_id =
         result.result.message_id;
+    }
   }
 
   return result;
@@ -567,18 +568,16 @@ async function answerCallback(
           "application/json"
       },
 
-      body:
-        JSON.stringify({
+      body: JSON.stringify({
 
-          callback_query_id:
-            callbackId,
+        callback_query_id:
+          callbackId,
 
-          text:
-            text,
+        text,
 
-          show_alert:
-            false
-        })
+        show_alert:
+          false
+      })
     }
   );
 }
@@ -614,7 +613,7 @@ function ensureUser(
     return true;
   }
 
-  // دعم المستخدمين الموجودين مسبقًا في data.json
+  // إضافة المتغير للمستخدمين القدامى
   if (
     !Object.prototype.hasOwnProperty.call(
       data.users[userId],
@@ -637,7 +636,11 @@ function updateActivity(
 ) {
 
   if (!data.users[userId]) {
-    ensureUser(data, userId);
+
+    ensureUser(
+      data,
+      userId
+    );
   }
 
   data.users[userId].last_active =
@@ -670,7 +673,7 @@ function isMaintenance(data) {
 
 
 // ======================================================
-// TYPE NAME
+// WORK TYPE NAME
 // ======================================================
 
 function getTypeName(type) {
@@ -695,7 +698,7 @@ function getTypeName(type) {
 
 
 // ======================================================
-// MAIN MENU
+// MAIN KEYBOARD
 // ======================================================
 
 function mainKeyboard() {
@@ -704,15 +707,21 @@ function mainKeyboard() {
 
     [
       {
-        text: "➕ إضافة عمل",
-        callback_data: "add"
+        text:
+          "➕ إضافة عمل",
+
+        callback_data:
+          "add"
       }
     ],
 
     [
       {
-        text: "📚 أعمالي",
-        callback_data: "list"
+        text:
+          "📚 أعمالي",
+
+        callback_data:
+          "list"
       }
     ]
 
@@ -729,27 +738,43 @@ function workTypeKeyboard() {
   return [
 
     [
+
       {
-        text: "📖 رواية",
-        callback_data: "type_novel"
+        text:
+          "📖 رواية",
+
+        callback_data:
+          "type_novel"
       },
 
       {
-        text: "📚 مانجا",
-        callback_data: "type_manga"
+        text:
+          "📚 مانجا",
+
+        callback_data:
+          "type_manga"
       }
+
     ],
 
     [
+
       {
-        text: "📘 مانهوا",
-        callback_data: "type_manhwa"
+        text:
+          "📘 مانهوا",
+
+        callback_data:
+          "type_manhwa"
       },
 
       {
-        text: "📕 مانها",
-        callback_data: "type_manhua"
+        text:
+          "📕 مانها",
+
+        callback_data:
+          "type_manhua"
       }
+
     ]
 
   ];
@@ -757,7 +782,7 @@ function workTypeKeyboard() {
 
 
 // ======================================================
-// START
+// START COMMAND
 // ======================================================
 
 async function startCommand(
@@ -781,7 +806,9 @@ async function startCommand(
   );
 
   await sendMessage(
+
     env,
+
     message.chat.id,
 
     "👋 <b>مرحبًا، معك Sandrone</b>\n\n" +
@@ -804,7 +831,7 @@ async function startCommand(
 
 
 // ======================================================
-// ADD WORK
+// ADD COMMAND
 // ======================================================
 
 async function addCommand(
@@ -834,7 +861,9 @@ async function addCommand(
   );
 
   await sendMessage(
+
     env,
+
     message.chat.id,
 
     "➕ <b>إضافة عمل جديد</b>\n\n" +
@@ -855,13 +884,14 @@ async function addCommand(
 
 
 // ======================================================
-// LIST WORKS
+// LIST COMMAND
 // ======================================================
 
 async function listCommand(
   message,
   env,
-  data
+  data,
+  sha
 ) {
 
   const userId =
@@ -877,15 +907,24 @@ async function listCommand(
   ) {
 
     await sendMessage(
+
       env,
+
       message.chat.id,
 
       "📚 لا توجد أعمال مضافة إلى قائمتك حاليًا.\n\n" +
+
       "اضغط ➕ إضافة عمل لإضافة أول عمل.",
 
       null,
 
       data
+    );
+
+    await saveData(
+      env,
+      data,
+      sha
     );
 
     return;
@@ -903,6 +942,7 @@ async function listCommand(
         work.type || "رواية";
 
       text +=
+
         `${index + 1}. <b>${escapeHtml(work.name)}</b>\n` +
 
         `🏷️ النوع: ${escapeHtml(type)}\n` +
@@ -926,11 +966,22 @@ async function listCommand(
   );
 
   await sendMessage(
+
     env,
+
     message.chat.id,
+
     text,
+
     keyboard,
+
     data
+  );
+
+  await saveData(
+    env,
+    data,
+    sha
   );
 }
 
@@ -972,9 +1023,9 @@ async function handleCallback(
   );
 
 
-  // ==========================================
+  // ==================================================
   // ADD
-  // ==========================================
+  // ==================================================
 
   if (action === "add") {
 
@@ -990,7 +1041,9 @@ async function handleCallback(
     };
 
     await sendMessage(
+
       env,
+
       chatId,
 
       "➕ <b>إضافة عمل جديد</b>\n\n" +
@@ -1012,15 +1065,20 @@ async function handleCallback(
   }
 
 
-  // ==========================================
-  // WORK TYPE
-  // ==========================================
+  // ==================================================
+  // TYPE
+  // ==================================================
 
   if (
+
     action === "type_novel" ||
+
     action === "type_manga" ||
+
     action === "type_manhwa" ||
+
     action === "type_manhua"
+
   ) {
 
     const types = {
@@ -1042,7 +1100,9 @@ async function handleCallback(
       types[action];
 
     const typeName =
-      getTypeName(selectedType);
+      getTypeName(
+        selectedType
+      );
 
     data.users[chatId].state = {
 
@@ -1054,13 +1114,18 @@ async function handleCallback(
     };
 
     await answerCallback(
+
       env,
+
       callback.id,
+
       `تم اختيار: ${selectedType}`
     );
 
     await sendMessage(
+
       env,
+
       chatId,
 
       `🏷️ <b>نوع العمل:</b> ${escapeHtml(selectedType)}\n\n` +
@@ -1082,9 +1147,9 @@ async function handleCallback(
   }
 
 
-  // ==========================================
+  // ==================================================
   // LIST
-  // ==========================================
+  // ==================================================
 
   if (action === "list") {
 
@@ -1094,18 +1159,23 @@ async function handleCallback(
     );
 
     await listCommand(
+
       callback.message,
+
       env,
-      data
+
+      data,
+
+      sha
     );
 
     return;
   }
 
 
-  // ==========================================
+  // ==================================================
   // REMOVE
-  // ==========================================
+  // ==================================================
 
   if (
     action.startsWith("remove_")
@@ -1120,14 +1190,21 @@ async function handleCallback(
       data.users[chatId];
 
     if (
+
       !user ||
+
       !user.works ||
+
       !user.works[index]
+
     ) {
 
       await answerCallback(
+
         env,
+
         callback.id,
+
         "العمل غير موجود."
       );
 
@@ -1149,7 +1226,9 @@ async function handleCallback(
     );
 
     await sendMessage(
+
       env,
+
       chatId,
 
       `⚠️ هل أنت متأكد من حذف ${escapeHtml(typeName)}:\n\n` +
@@ -1161,17 +1240,23 @@ async function handleCallback(
       [
 
         [
+
           {
-            text: "✅ نعم، احذف",
+            text:
+              "✅ نعم، احذف",
+
             callback_data:
               `confirm_remove_${index}`
           },
 
           {
-            text: "❌ إلغاء",
+            text:
+              "❌ إلغاء",
+
             callback_data:
               "cancel_remove"
           }
+
         ]
 
       ],
@@ -1179,16 +1264,24 @@ async function handleCallback(
       data
     );
 
+    await saveData(
+      env,
+      data,
+      sha
+    );
+
     return;
   }
 
 
-  // ==========================================
+  // ==================================================
   // CONFIRM REMOVE
-  // ==========================================
+  // ==================================================
 
   if (
-    action.startsWith("confirm_remove_")
+    action.startsWith(
+      "confirm_remove_"
+    )
   ) {
 
     const index =
@@ -1200,14 +1293,21 @@ async function handleCallback(
       data.users[chatId];
 
     if (
+
       !user ||
+
       !user.works ||
+
       !user.works[index]
+
     ) {
 
       await answerCallback(
+
         env,
+
         callback.id,
+
         "العمل غير موجود."
       );
 
@@ -1227,16 +1327,22 @@ async function handleCallback(
       getTypeName(type);
 
     await answerCallback(
+
       env,
+
       callback.id,
+
       "تم الحذف."
     );
 
     await sendMessage(
+
       env,
+
       chatId,
 
       `🗑️ تم حذف ${escapeHtml(typeName)} ` +
+
       `<b>${escapeHtml(removed.name)}</b> من قائمتك.`,
 
       null,
@@ -1254,35 +1360,49 @@ async function handleCallback(
   }
 
 
-  // ==========================================
+  // ==================================================
   // CANCEL REMOVE
-  // ==========================================
+  // ==================================================
 
   if (
     action === "cancel_remove"
   ) {
 
     await answerCallback(
+
       env,
+
       callback.id,
+
       "تم الإلغاء."
     );
 
     await sendMessage(
+
       env,
+
       chatId,
+
       "❌ تم إلغاء عملية الحذف.",
+
       null,
+
       data
+    );
+
+    await saveData(
+      env,
+      data,
+      sha
     );
 
     return;
   }
 
 
-  // ==========================================
+  // ==================================================
   // ADMIN PANEL
-  // ==========================================
+  // ==================================================
 
   if (
     action === "admin_panel"
@@ -1291,8 +1411,11 @@ async function handleCallback(
     if (!isAdmin(chatId)) {
 
       await answerCallback(
+
         env,
+
         callback.id,
+
         "غير مصرح."
       );
 
@@ -1304,6 +1427,11 @@ async function handleCallback(
       callback.id
     );
 
+    // مهم:
+    // لا نمرر data هنا
+    // حتى لا تدخل رسالة لوحة التحكم
+    // في نظام الحذف
+
     await adminPanel(
       chatId,
       env,
@@ -1314,20 +1442,26 @@ async function handleCallback(
   }
 
 
-  // ==========================================
+  // ==================================================
   // MAINTENANCE
-  // ==========================================
+  // ==================================================
 
   if (
+
     action === "maintenance_on" ||
+
     action === "maintenance_off"
+
   ) {
 
     if (!isAdmin(chatId)) {
 
       await answerCallback(
+
         env,
+
         callback.id,
+
         "غير مصرح."
       );
 
@@ -1351,21 +1485,29 @@ async function handleCallback(
         data
       );
 
+      // رسالة إدارية
       await sendMessage(
+
         env,
+
         chatId,
 
         "🔴 <b>تم تفعيل وضع الصيانة.</b>\n\n" +
+
         "المستخدمون العاديون لن يتمكنوا من استخدام البوت حتى إيقاف الصيانة."
       );
 
     } else {
 
+      // رسالة إدارية
       await sendMessage(
+
         env,
+
         chatId,
 
         "🟢 <b>تم إيقاف وضع الصيانة.</b>\n\n" +
+
         "عاد البوت للعمل للمستخدمين."
       );
     }
@@ -1380,9 +1522,9 @@ async function handleCallback(
   }
 
 
-  // ==========================================
+  // ==================================================
   // ADMIN WORKS
-  // ==========================================
+  // ==================================================
 
   if (
     action === "admin_works"
@@ -1391,8 +1533,11 @@ async function handleCallback(
     if (!isAdmin(chatId)) {
 
       await answerCallback(
+
         env,
+
         callback.id,
+
         "غير مصرح."
       );
 
@@ -1404,6 +1549,7 @@ async function handleCallback(
       callback.id
     );
 
+    // رسالة إدارية
     await showAllWorks(
       chatId,
       env,
@@ -1445,16 +1591,105 @@ async function handleMessage(
   );
 
 
-  // ==========================================
+  // ==================================================
   // START
-  // ==========================================
+  // ==================================================
 
   if (
     text === "/start"
   ) {
 
     await startCommand(
+
       message,
+
+      env,
+
+      data,
+
+      sha
+    );
+
+    return;
+  }
+
+
+  // ==================================================
+  // ADMIN
+  // ==================================================
+
+  if (
+    text === "/admin"
+  ) {
+
+    if (!isAdminUser) {
+
+      // رسالة عادية للمستخدم
+      await sendMessage(
+
+        env,
+
+        chatId,
+
+        "⛔ هذا الأمر متاح للمبرمج فقط.",
+
+        null,
+
+        data
+      );
+
+      await saveData(
+        env,
+        data,
+        sha
+      );
+
+      return;
+    }
+
+    // لوحة المبرمج
+    // لا تمرر data
+    await adminPanel(
+
+      chatId,
+
+      env,
+
+      data
+    );
+
+    return;
+  }
+
+
+  // ==================================================
+  // MAINTENANCE
+  // ==================================================
+
+  if (
+
+    isMaintenance(data) &&
+
+    !isAdminUser
+
+  ) {
+
+    await sendMessage(
+
+      env,
+
+      chatId,
+
+      "🔧 <b>البوت في وضع الصيانة حاليًا.</b>\n\n" +
+
+      "يرجى المحاولة مرة أخرى لاحقًا.",
+
+      null,
+
+      data
+    );
+
+    await saveData(
       env,
       data,
       sha
@@ -1464,63 +1699,9 @@ async function handleMessage(
   }
 
 
-  // ==========================================
-  // ADMIN
-  // ==========================================
-
-  if (
-    text === "/admin"
-  ) {
-
-    if (!isAdminUser) {
-
-      await sendMessage(
-        env,
-        chatId,
-        "⛔ هذا الأمر متاح للمبرمج فقط."
-      );
-
-      return;
-    }
-
-    await adminPanel(
-      chatId,
-      env,
-      data
-    );
-
-    return;
-  }
-
-
-  // ==========================================
-  // MAINTENANCE
-  // ==========================================
-
-  if (
-    isMaintenance(data) &&
-    !isAdminUser
-  ) {
-
-    await sendMessage(
-      env,
-      chatId,
-
-      "🔧 <b>البوت في وضع الصيانة حاليًا.</b>\n\n" +
-      "يرجى المحاولة مرة أخرى لاحقًا.",
-
-      null,
-
-      data
-    );
-
-    return;
-  }
-
-
-  // ==========================================
+  // ==================================================
   // ACTIVITY
-  // ==========================================
+  // ==================================================
 
   const now =
     Date.now();
@@ -1529,7 +1710,8 @@ async function handleMessage(
     data.users[chatId].last_active || 0;
 
   const shouldSaveActivity =
-    now - previousActivity >
+    now -
+    previousActivity >
     ACTIVE_TIME;
 
   updateActivity(
@@ -1538,18 +1720,22 @@ async function handleMessage(
   );
 
 
-  // ==========================================
+  // ==================================================
   // ADD
-  // ==========================================
+  // ==================================================
 
   if (
     text === "/add"
   ) {
 
     await addCommand(
+
       message,
+
       env,
+
       data,
+
       sha
     );
 
@@ -1557,46 +1743,45 @@ async function handleMessage(
   }
 
 
-  // ==========================================
+  // ==================================================
   // LIST
-  // ==========================================
+  // ==================================================
 
   if (
     text === "/list"
   ) {
 
     await listCommand(
+
       message,
+
       env,
-      data
+
+      data,
+
+      sha
     );
-
-    if (shouldSaveActivity) {
-
-      await saveData(
-        env,
-        data,
-        sha
-      );
-    }
 
     return;
   }
 
 
-  // ==========================================
+  // ==================================================
   // USER STATE
-  // ==========================================
+  // ==================================================
 
   const user =
     data.users[chatId];
+
 
   if (
     !user.state
   ) {
 
     await sendMessage(
+
       env,
+
       chatId,
 
       "اختر أمرًا من القائمة 👇",
@@ -1606,22 +1791,19 @@ async function handleMessage(
       data
     );
 
-    if (shouldSaveActivity) {
-
-      await saveData(
-        env,
-        data,
-        sha
-      );
-    }
+    await saveData(
+      env,
+      data,
+      sha
+    );
 
     return;
   }
 
 
-  // ==========================================
-  // WAITING FOR TYPE
-  // ==========================================
+  // ==================================================
+  // WAITING TYPE
+  // ==================================================
 
   if (
     user.state.step ===
@@ -1629,7 +1811,9 @@ async function handleMessage(
   ) {
 
     await sendMessage(
+
       env,
+
       chatId,
 
       "🏷️ <b>اختر نوع العمل أولًا:</b>",
@@ -1639,13 +1823,19 @@ async function handleMessage(
       data
     );
 
+    await saveData(
+      env,
+      data,
+      sha
+    );
+
     return;
   }
 
 
-  // ==========================================
-  // WAITING FOR NAME
-  // ==========================================
+  // ==================================================
+  // WAITING NAME
+  // ==================================================
 
   if (
     user.state.step ===
@@ -1661,7 +1851,9 @@ async function handleMessage(
     if (!text) {
 
       await sendMessage(
+
         env,
+
         chatId,
 
         `❌ أرسل اسم ${escapeHtml(typeName)}.`,
@@ -1669,6 +1861,12 @@ async function handleMessage(
         null,
 
         data
+      );
+
+      await saveData(
+        env,
+        data,
+        sha
       );
 
       return;
@@ -1679,15 +1877,16 @@ async function handleMessage(
       step:
         "waiting_url",
 
-      type:
-        type,
+      type,
 
       name:
         text
     };
 
     await sendMessage(
+
       env,
+
       chatId,
 
       `🔗 الآن أرسل رابط صفحة ${escapeHtml(typeName)}.`,
@@ -1707,9 +1906,9 @@ async function handleMessage(
   }
 
 
-  // ==========================================
-  // WAITING FOR URL
-  // ==========================================
+  // ==================================================
+  // WAITING URL
+  // ==================================================
 
   if (
     user.state.step ===
@@ -1730,7 +1929,9 @@ async function handleMessage(
     ) {
 
       await sendMessage(
+
         env,
+
         chatId,
 
         `❌ الرابط غير صحيح.\n\n` +
@@ -1742,6 +1943,12 @@ async function handleMessage(
         data
       );
 
+      await saveData(
+        env,
+        data,
+        sha
+      );
+
       return;
     }
 
@@ -1749,18 +1956,22 @@ async function handleMessage(
 
       const response =
         await fetch(
+
           url,
+
           {
-            method: "GET"
+            method:
+              "GET"
           }
+
         );
 
-      if (
-        !response.ok
-      ) {
+      if (!response.ok) {
 
         await sendMessage(
+
           env,
+
           chatId,
 
           `⚠️ تمكنت من الوصول إلى الرابط لكن الموقع أعاد حالة غير طبيعية.\n\n` +
@@ -1772,13 +1983,21 @@ async function handleMessage(
           data
         );
 
+        await saveData(
+          env,
+          data,
+          sha
+        );
+
         return;
       }
 
     } catch {
 
       await sendMessage(
+
         env,
+
         chatId,
 
         `⚠️ لم أتمكن من الوصول إلى رابط ${escapeHtml(typeName)}.\n\n` +
@@ -1790,6 +2009,12 @@ async function handleMessage(
         data
       );
 
+      await saveData(
+        env,
+        data,
+        sha
+      );
+
       return;
     }
 
@@ -1798,18 +2023,18 @@ async function handleMessage(
       step:
         "waiting_chapter",
 
-      type:
-        type,
+      type,
 
       name:
         user.state.name,
 
-      url:
-        url
+      url
     };
 
     await sendMessage(
+
       env,
+
       chatId,
 
       `🔢 ممتاز.\n\n` +
@@ -1833,9 +2058,9 @@ async function handleMessage(
   }
 
 
-  // ==========================================
-  // WAITING FOR CHAPTER
-  // ==========================================
+  // ==================================================
+  // WAITING CHAPTER
+  // ==================================================
 
   if (
     user.state.step ===
@@ -1855,12 +2080,17 @@ async function handleMessage(
       Number(normalizedText);
 
     if (
+
       !Number.isInteger(chapter) ||
+
       chapter < 0
+
     ) {
 
       await sendMessage(
+
         env,
+
         chatId,
 
         `❌ أرسل رقم فصل صحيح لـ ${escapeHtml(typeName)}.\n\n` +
@@ -1872,13 +2102,18 @@ async function handleMessage(
         data
       );
 
+      await saveData(
+        env,
+        data,
+        sha
+      );
+
       return;
     }
 
     user.works.push({
 
-      type:
-        type,
+      type,
 
       name:
         user.state.name,
@@ -1897,7 +2132,9 @@ async function handleMessage(
       null;
 
     await sendMessage(
+
       env,
+
       chatId,
 
       `✅ <b>تمت إضافة ${escapeHtml(typeName)} بنجاح!</b>\n\n` +
@@ -1923,9 +2160,9 @@ async function handleMessage(
   }
 
 
-  // ==========================================
+  // ==================================================
   // SAVE ACTIVITY
-  // ==========================================
+  // ==================================================
 
   if (
     shouldSaveActivity
@@ -1941,7 +2178,7 @@ async function handleMessage(
 
 
 // ======================================================
-// NORMALIZE ARABIC DIGITS
+// NORMALIZE DIGITS
 // ======================================================
 
 function normalizeDigits(
@@ -1981,7 +2218,6 @@ async function adminPanel(
 ) {
 
   if (!isAdmin(chatId)) {
-
     return;
   }
 
@@ -2010,18 +2246,23 @@ async function adminPanel(
       }
 
       if (
+
         now -
         (user.last_active || 0)
         <=
         ACTIVE_TIME
+
       ) {
 
         activeUsers++;
       }
 
       totalWorks +=
+
         Array.isArray(user.works)
+
           ? user.works.length
+
           : 0;
     }
   );
@@ -2041,35 +2282,48 @@ async function adminPanel(
 
     `🔧 وضع الصيانة: <b>${maintenance ? "🔴 مفعّل" : "🟢 متوقف"}</b>`;
 
-  // هذه رسالة إدارية، لذلك لا نمرر data
-  // وبالتالي لا تدخل في نظام الحذف
+  // لا نمرر data هنا
+  // لأن هذه رسالة إدارية
 
   await sendMessage(
+
     env,
+
     chatId,
+
     text,
 
     [
 
       [
+
         {
-          text: "📚 جميع الأعمال",
+          text:
+            "📚 جميع الأعمال",
+
           callback_data:
             "admin_works"
         }
+
       ],
 
       [
 
         {
           text:
+
             maintenance
+
               ? "🟢 إيقاف الصيانة"
+
               : "🔴 تفعيل الصيانة",
 
           callback_data:
+
             maintenance
+
               ? "maintenance_off"
+
               : "maintenance_on"
         }
 
@@ -2098,21 +2352,28 @@ async function showAllWorks(
 
   for (
     const userId of
-    Object.keys(data.users || {})
+    Object.keys(
+      data.users || {}
+    )
   ) {
 
     const user =
       data.users[userId];
 
     if (
+
       !user ||
+
       !Array.isArray(user.works)
+
     ) {
+
       continue;
     }
 
     for (
-      const work of user.works
+      const work of
+      user.works
     ) {
 
       total++;
@@ -2147,7 +2408,7 @@ async function showAllWorks(
       `📊 <b>الإجمالي: ${total}</b>`;
   }
 
-  // رسالة إدارية، لا تدخل في الحذف
+  // رسالة إدارية
   await sendMessage(
     env,
     chatId,
@@ -2175,31 +2436,42 @@ async function broadcastMaintenance(
 
   for (
     const userId of
-    Object.keys(data.users || {})
+    Object.keys(
+      data.users || {}
+    )
   ) {
 
     if (
       String(userId) ===
       String(ADMIN_CHAT_ID)
     ) {
+
       continue;
     }
 
     try {
 
-      // رسالة نظامية وليست جزءًا من تنقل المستخدم
-      // لذلك لا نحذف الرسالة السابقة ولا نسجلها
+      // رسالة نظامية
+      // لا نحذف الرسالة السابقة
+      // ولا نسجلها كآخر رسالة عادية
+
       await sendMessage(
+
         env,
+
         userId,
+
         message
       );
 
     } catch (error) {
 
       console.error(
+
         "Broadcast error:",
+
         userId,
+
         error
       );
     }
