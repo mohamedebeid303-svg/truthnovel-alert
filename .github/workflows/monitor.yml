@@ -1,48 +1,88 @@
-name: TruthNovel Alert
+name: TruthNovel Chapter Monitor
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/5 * * * *"
+
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: truthnovel-alert
+  group: truthnovel-monitor
   cancel-in-progress: false
 
 jobs:
+
   monitor:
+
     runs-on: ubuntu-latest
 
     steps:
+
+      # ==========================================
+      # Download repository
+      # ==========================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
+
+
+      # ==========================================
+      # Python
+      # ==========================================
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
 
-      - name: Run bot
+      # ==========================================
+      # Dependencies
+      # ==========================================
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+
+      # ==========================================
+      # Run chapter monitor
+      # ==========================================
+
+      - name: Monitor chapters
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        run: python bot.py
-
-      - name: Save bot data
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python monitor.py
 
-          git add data.json last_chapter.txt
+
+      # ==========================================
+      # Save changes
+      # ==========================================
+
+      - name: Commit updated data
+        run: |
+
+          git config user.name "github-actions[bot]"
+
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data.json
 
           if git diff --cached --quiet; then
+
             echo "No changes to save."
+
           else
-            git commit -m "Update bot data"
+
+            git commit -m "Update chapter data"
+
             git push
+
           fi
