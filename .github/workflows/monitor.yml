@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: truthnovel-alert
+  cancel-in-progress: false
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
@@ -29,16 +33,16 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: python bot.py
 
-      - name: Save last chapter
+      - name: Save bot data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add last_chapter.txt
+          git add data.json last_chapter.txt
 
           if git diff --cached --quiet; then
             echo "No changes to save."
           else
-            git commit -m "Update last chapter"
+            git commit -m "Update bot data"
             git push
           fi
