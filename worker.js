@@ -334,6 +334,89 @@ async function saveData(
 
 
 // ======================================================
+// DELETE PREVIOUS BOT MESSAGE
+// ======================================================
+
+async function deletePreviousBotMessage(
+  env,
+  chatId,
+  data
+) {
+
+  // لا نحذف أي رسالة تلقائيًا من حساب المبرمج
+  if (
+    String(chatId) ===
+    String(ADMIN_CHAT_ID)
+  ) {
+
+    return;
+  }
+
+  const user =
+    data.users &&
+    data.users[String(chatId)];
+
+  if (!user) {
+    return;
+  }
+
+  const messageId =
+    user.last_bot_message_id;
+
+  if (!messageId) {
+    return;
+  }
+
+  try {
+
+    const url =
+      `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/deleteMessage`;
+
+    const response =
+      await fetch(
+        url,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json"
+          },
+
+          body:
+            JSON.stringify({
+
+              chat_id:
+                chatId,
+
+              message_id:
+                messageId
+            })
+        }
+      );
+
+    if (!response.ok) {
+
+      console.error(
+        "DELETE MESSAGE ERROR:",
+        await response.text()
+      );
+    }
+
+  } catch (error) {
+
+    console.error(
+      "DELETE MESSAGE EXCEPTION:",
+      error
+    );
+  }
+
+  user.last_bot_message_id =
+    null;
+}
+
+
+// ======================================================
 // TELEGRAM SEND MESSAGE
 // ======================================================
 
@@ -341,8 +424,24 @@ async function sendMessage(
   env,
   chatId,
   text,
-  keyboard = null
+  keyboard = null,
+  data = null,
+  saveMessage = true
 ) {
+
+  // حذف الرسالة السابقة للمستخدم العادي
+  if (
+    data &&
+    String(chatId) !==
+    String(ADMIN_CHAT_ID)
+  ) {
+
+    await deletePreviousBotMessage(
+      env,
+      chatId,
+      data
+    );
+  }
 
   const url =
     `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -393,9 +492,55 @@ async function sendMessage(
       response.status,
       errorText
     );
+
+    return null;
   }
 
-  return response;
+  let result;
+
+  try {
+
+    result =
+      await response.json();
+
+  } catch {
+
+    return null;
+  }
+
+  // حفظ رقم آخر رسالة أرسلها البوت للمستخدم العادي
+  if (
+    saveMessage &&
+    data &&
+    result.ok &&
+    result.result &&
+    result.result.message_id &&
+    String(chatId) !==
+      String(ADMIN_CHAT_ID)
+  ) {
+
+    if (!data.users[String(chatId)]) {
+
+      data.users[String(chatId)] = {
+
+        works: [],
+
+        state: null,
+
+        first_seen:
+          Date.now(),
+
+        last_active:
+          Date.now()
+      };
+    }
+
+    data.users[String(chatId)]
+      .last_bot_message_id =
+        result.result.message_id;
+  }
+
+  return result;
 }
 
 
@@ -460,10 +605,26 @@ function ensureUser(
         Date.now(),
 
       last_active:
-        Date.now()
+        Date.now(),
+
+      last_bot_message_id:
+        null
     };
 
     return true;
+  }
+
+  // دعم المستخدمين الموجودين مسبقًا في data.json
+  if (
+    !Object.prototype.hasOwnProperty.call(
+      data.users[userId],
+      "last_bot_message_id"
+    )
+  ) {
+
+    data.users[userId]
+      .last_bot_message_id =
+        null;
   }
 
   return false;
@@ -619,12 +780,6 @@ async function startCommand(
     userId
   );
 
-  await saveData(
-    env,
-    data,
-    sha
-  );
-
   await sendMessage(
     env,
     message.chat.id,
@@ -635,7 +790,15 @@ async function startCommand(
 
     "اختر أحد الخيارات من القائمة:",
 
-    mainKeyboard()
+    mainKeyboard(),
+
+    data
+  );
+
+  await saveData(
+    env,
+    data,
+    sha
   );
 }
 
@@ -670,12 +833,6 @@ async function addCommand(
     userId
   );
 
-  await saveData(
-    env,
-    data,
-    sha
-  );
-
   await sendMessage(
     env,
     message.chat.id,
@@ -684,7 +841,15 @@ async function addCommand(
 
     "اختر نوع العمل:",
 
-    workTypeKeyboard()
+    workTypeKeyboard(),
+
+    data
+  );
+
+  await saveData(
+    env,
+    data,
+    sha
   );
 }
 
@@ -716,7 +881,11 @@ async function listCommand(
       message.chat.id,
 
       "📚 لا توجد أعمال مضافة إلى قائمتك حاليًا.\n\n" +
-      "اضغط ➕ إضافة عمل لإضافة أول عمل."
+      "اضغط ➕ إضافة عمل لإضافة أول عمل.",
+
+      null,
+
+      data
     );
 
     return;
@@ -732,9 +901,6 @@ async function listCommand(
 
       const type =
         work.type || "رواية";
-
-      const typeName =
-        getTypeName(type);
 
       text +=
         `${index + 1}. <b>${escapeHtml(work.name)}</b>\n` +
@@ -763,7 +929,8 @@ async function listCommand(
     env,
     message.chat.id,
     text,
-    keyboard
+    keyboard,
+    data
   );
 }
 
@@ -822,12 +989,6 @@ async function handleCallback(
         "waiting_type"
     };
 
-    await saveData(
-      env,
-      data,
-      sha
-    );
-
     await sendMessage(
       env,
       chatId,
@@ -836,7 +997,15 @@ async function handleCallback(
 
       "اختر نوع العمل:",
 
-      workTypeKeyboard()
+      workTypeKeyboard(),
+
+      data
+    );
+
+    await saveData(
+      env,
+      data,
+      sha
     );
 
     return;
@@ -890,19 +1059,23 @@ async function handleCallback(
       `تم اختيار: ${selectedType}`
     );
 
-    await saveData(
-      env,
-      data,
-      sha
-    );
-
     await sendMessage(
       env,
       chatId,
 
       `🏷️ <b>نوع العمل:</b> ${escapeHtml(selectedType)}\n\n` +
 
-      `✏️ الآن أرسل اسم ${escapeHtml(typeName)}.`
+      `✏️ الآن أرسل اسم ${escapeHtml(typeName)}.`,
+
+      null,
+
+      data
+    );
+
+    await saveData(
+      env,
+      data,
+      sha
     );
 
     return;
@@ -1001,7 +1174,9 @@ async function handleCallback(
           }
         ]
 
-      ]
+      ],
+
+      data
     );
 
     return;
@@ -1051,12 +1226,6 @@ async function handleCallback(
     const typeName =
       getTypeName(type);
 
-    await saveData(
-      env,
-      data,
-      sha
-    );
-
     await answerCallback(
       env,
       callback.id,
@@ -1068,7 +1237,17 @@ async function handleCallback(
       chatId,
 
       `🗑️ تم حذف ${escapeHtml(typeName)} ` +
-      `<b>${escapeHtml(removed.name)}</b> من قائمتك.`
+      `<b>${escapeHtml(removed.name)}</b> من قائمتك.`,
+
+      null,
+
+      data
+    );
+
+    await saveData(
+      env,
+      data,
+      sha
     );
 
     return;
@@ -1092,7 +1271,9 @@ async function handleCallback(
     await sendMessage(
       env,
       chatId,
-      "❌ تم إلغاء عملية الحذف."
+      "❌ تم إلغاء عملية الحذف.",
+      null,
+      data
     );
 
     return;
@@ -1156,12 +1337,6 @@ async function handleCallback(
     data.settings.maintenance =
       action === "maintenance_on";
 
-    await saveData(
-      env,
-      data,
-      sha
-    );
-
     await answerCallback(
       env,
       callback.id
@@ -1194,6 +1369,12 @@ async function handleCallback(
         "عاد البوت للعمل للمستخدمين."
       );
     }
+
+    await saveData(
+      env,
+      data,
+      sha
+    );
 
     return;
   }
@@ -1326,7 +1507,11 @@ async function handleMessage(
       chatId,
 
       "🔧 <b>البوت في وضع الصيانة حاليًا.</b>\n\n" +
-      "يرجى المحاولة مرة أخرى لاحقًا."
+      "يرجى المحاولة مرة أخرى لاحقًا.",
+
+      null,
+
+      data
     );
 
     return;
@@ -1380,6 +1565,12 @@ async function handleMessage(
     text === "/list"
   ) {
 
+    await listCommand(
+      message,
+      env,
+      data
+    );
+
     if (shouldSaveActivity) {
 
       await saveData(
@@ -1388,12 +1579,6 @@ async function handleMessage(
         sha
       );
     }
-
-    await listCommand(
-      message,
-      env,
-      data
-    );
 
     return;
   }
@@ -1410,6 +1595,17 @@ async function handleMessage(
     !user.state
   ) {
 
+    await sendMessage(
+      env,
+      chatId,
+
+      "اختر أمرًا من القائمة 👇",
+
+      mainKeyboard(),
+
+      data
+    );
+
     if (shouldSaveActivity) {
 
       await saveData(
@@ -1418,15 +1614,6 @@ async function handleMessage(
         sha
       );
     }
-
-    await sendMessage(
-      env,
-      chatId,
-
-      "اختر أمرًا من القائمة 👇",
-
-      mainKeyboard()
-    );
 
     return;
   }
@@ -1447,7 +1634,9 @@ async function handleMessage(
 
       "🏷️ <b>اختر نوع العمل أولًا:</b>",
 
-      workTypeKeyboard()
+      workTypeKeyboard(),
+
+      data
     );
 
     return;
@@ -1475,7 +1664,11 @@ async function handleMessage(
         env,
         chatId,
 
-        `❌ أرسل اسم ${escapeHtml(typeName)}.`
+        `❌ أرسل اسم ${escapeHtml(typeName)}.`,
+
+        null,
+
+        data
       );
 
       return;
@@ -1493,17 +1686,21 @@ async function handleMessage(
         text
     };
 
-    await saveData(
-      env,
-      data,
-      sha
-    );
-
     await sendMessage(
       env,
       chatId,
 
-      `🔗 الآن أرسل رابط صفحة ${escapeHtml(typeName)}.`
+      `🔗 الآن أرسل رابط صفحة ${escapeHtml(typeName)}.`,
+
+      null,
+
+      data
+    );
+
+    await saveData(
+      env,
+      data,
+      sha
     );
 
     return;
@@ -1538,7 +1735,11 @@ async function handleMessage(
 
         `❌ الرابط غير صحيح.\n\n` +
 
-        `أرسل رابط صفحة ${escapeHtml(typeName)} يبدأ بـ <b>http://</b> أو <b>https://</b>.`
+        `أرسل رابط صفحة ${escapeHtml(typeName)} يبدأ بـ <b>http://</b> أو <b>https://</b>.`,
+
+        null,
+
+        data
       );
 
       return;
@@ -1564,7 +1765,11 @@ async function handleMessage(
 
           `⚠️ تمكنت من الوصول إلى الرابط لكن الموقع أعاد حالة غير طبيعية.\n\n` +
 
-          `إذا كنت متأكدًا من الرابط، أرسل رابط صفحة ${escapeHtml(typeName)} مرة أخرى.`
+          `إذا كنت متأكدًا من الرابط، أرسل رابط صفحة ${escapeHtml(typeName)} مرة أخرى.`,
+
+          null,
+
+          data
         );
 
         return;
@@ -1578,7 +1783,11 @@ async function handleMessage(
 
         `⚠️ لم أتمكن من الوصول إلى رابط ${escapeHtml(typeName)}.\n\n` +
 
-        "تأكد من أن الرابط صحيح ويمكن فتحه."
+        "تأكد من أن الرابط صحيح ويمكن فتحه.",
+
+        null,
+
+        data
       );
 
       return;
@@ -1599,12 +1808,6 @@ async function handleMessage(
         url
     };
 
-    await saveData(
-      env,
-      data,
-      sha
-    );
-
     await sendMessage(
       env,
       chatId,
@@ -1613,7 +1816,17 @@ async function handleMessage(
 
       `أرسل رقم آخر فصل صدر من ${escapeHtml(typeName)} حاليًا.\n\n` +
 
-      "مثال: <b>125</b>"
+      "مثال: <b>125</b>",
+
+      null,
+
+      data
+    );
+
+    await saveData(
+      env,
+      data,
+      sha
     );
 
     return;
@@ -1652,7 +1865,11 @@ async function handleMessage(
 
         `❌ أرسل رقم فصل صحيح لـ ${escapeHtml(typeName)}.\n\n` +
 
-        "مثال: <b>125</b>"
+        "مثال: <b>125</b>",
+
+        null,
+
+        data
       );
 
       return;
@@ -1679,12 +1896,6 @@ async function handleMessage(
     user.state =
       null;
 
-    await saveData(
-      env,
-      data,
-      sha
-    );
-
     await sendMessage(
       env,
       chatId,
@@ -1695,7 +1906,17 @@ async function handleMessage(
 
       `🔢 آخر فصل: ${chapter}\n\n` +
 
-      `سيحتفظ Sandrone بهذه ${escapeHtml(typeName)} ضمن قائمتك.`
+      `سيحتفظ Sandrone بهذه ${escapeHtml(typeName)} ضمن قائمتك.`,
+
+      null,
+
+      data
+    );
+
+    await saveData(
+      env,
+      data,
+      sha
     );
 
     return;
@@ -1820,6 +2041,9 @@ async function adminPanel(
 
     `🔧 وضع الصيانة: <b>${maintenance ? "🔴 مفعّل" : "🟢 متوقف"}</b>`;
 
+  // هذه رسالة إدارية، لذلك لا نمرر data
+  // وبالتالي لا تدخل في نظام الحذف
+
   await sendMessage(
     env,
     chatId,
@@ -1896,9 +2120,6 @@ async function showAllWorks(
       const type =
         work.type || "رواية";
 
-      const typeName =
-        getTypeName(type);
-
       text +=
 
         `👤 <b>المستخدم:</b> ${escapeHtml(userId)}\n` +
@@ -1926,6 +2147,7 @@ async function showAllWorks(
       `📊 <b>الإجمالي: ${total}</b>`;
   }
 
+  // رسالة إدارية، لا تدخل في الحذف
   await sendMessage(
     env,
     chatId,
@@ -1965,6 +2187,8 @@ async function broadcastMaintenance(
 
     try {
 
+      // رسالة نظامية وليست جزءًا من تنقل المستخدم
+      // لذلك لا نحذف الرسالة السابقة ولا نسجلها
       await sendMessage(
         env,
         userId,
