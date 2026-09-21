@@ -7,16 +7,17 @@
           "name": "Lord Of Th Truth",
           "url": "https://truthnovel.top/",
           "last_chapter": 2454
+        },
+        {
+          "type": "رواية",
+          "name": "Worthless Profession: Dragon Tamer",
+          "url": "https://www.divinedaolibrary.com/story/worthless-profession-dragon-tamer/",
+          "last_chapter": 1150
         }
       ],
-      "state": {
-        "step": "waiting_chapter",
-        "type": "رواية",
-        "name": "Worthless Profession: Dragon Tamer",
-        "url": "https://www.divinedaolibrary.com/story/worthless-profession-dragon-tamer/"
-      },
+      "state": null,
       "first_seen": 1790025835463,
-      "last_active": 1790031652496
+      "last_active": 1790031682299
     },
     "2057656653": {
       "works": [],
