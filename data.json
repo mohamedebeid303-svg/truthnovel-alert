@@ -14,8 +14,9 @@
     "5794991077": {
       "works": [],
       "state": {
-        "step": "waiting_name",
-        "type": "مانهوا"
+        "step": "waiting_url",
+        "type": "مانهوا",
+        "name": "Solo Leveling: Ragnarok"
       }
     }
   }
