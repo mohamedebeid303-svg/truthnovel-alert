@@ -20,7 +20,7 @@
         "type": "مانها"
       },
       "first_seen": 1790025835463,
-      "last_active": 1790034649067,
+      "last_active": 1790034672909,
       "last_bot_message_id": 164
     },
     "2057656653": {
@@ -39,6 +39,6 @@
     }
   },
   "settings": {
-    "maintenance": true
+    "maintenance": false
   }
 }
