@@ -9,9 +9,11 @@
           "last_chapter": 2454
         }
       ],
-      "state": null,
+      "state": {
+        "step": "waiting_name"
+      },
       "first_seen": 1790025835463,
-      "last_active": 1790030968577
+      "last_active": 1790031251658
     },
     "2057656653": {
       "works": [],
