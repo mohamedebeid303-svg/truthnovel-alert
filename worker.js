@@ -580,7 +580,7 @@ async function startCommand(
     env,
     message.chat.id,
 
-    "👋 <b>مرحبًا بك في Sandrone</b>\n\n" +
+    "👋 <b>مرحبًا، معك Sandrone</b>\n\n" +
 
     "سأساعدك في مراقبة أعمالك وإعلامك عند صدور فصل جديد.\n\n" +
 
