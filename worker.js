@@ -3,7 +3,6 @@ const DATA_FILE = "data.json";
 
 const ADMIN_CHAT_ID = "805162451";
 
-// المستخدم يعتبر نشطًا إذا تفاعل خلال آخر 15 دقيقة
 const ACTIVE_TIME = 15 * 60 * 1000;
 
 
@@ -17,7 +16,6 @@ export default {
 
     try {
 
-      // اختبار Worker من المتصفح
       if (request.method !== "POST") {
 
         return new Response(
@@ -30,10 +28,8 @@ export default {
 
       const update = await request.json();
 
-      // تحديث أوامر Telegram تلقائيًا
       await ensureBotCommands(env);
 
-      // Callback buttons
       if (update.callback_query) {
 
         await handleCallback(
@@ -42,10 +38,8 @@ export default {
         );
 
         return new Response("OK");
-
       }
 
-      // Telegram message
       if (update.message) {
 
         await handleMessage(
@@ -65,9 +59,7 @@ export default {
         error
       );
 
-      return new Response(
-        "OK"
-      );
+      return new Response("OK");
     }
   }
 };
@@ -99,7 +91,6 @@ async function ensureBotCommands(env) {
       }
     ];
 
-    // القائمة العامة
     await fetch(
       `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`,
       {
@@ -121,7 +112,6 @@ async function ensureBotCommands(env) {
       }
     );
 
-    // قائمة المدير
     await fetch(
       `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`,
       {
@@ -232,12 +222,10 @@ async function loadData(env) {
     data = {};
   }
 
-  // التأكد من وجود users
   if (!data.users) {
     data.users = {};
   }
 
-  // التأكد من وجود settings
   if (!data.settings) {
 
     data.settings = {
@@ -547,6 +535,42 @@ function mainKeyboard() {
 
 
 // ======================================================
+// WORK TYPE KEYBOARD
+// ======================================================
+
+function workTypeKeyboard() {
+
+  return [
+
+    [
+      {
+        text: "📖 رواية",
+        callback_data: "type_novel"
+      },
+
+      {
+        text: "📚 مانجا",
+        callback_data: "type_manga"
+      }
+    ],
+
+    [
+      {
+        text: "📘 مانهوا",
+        callback_data: "type_manhwa"
+      },
+
+      {
+        text: "📕 مانها",
+        callback_data: "type_manhua"
+      }
+    ]
+
+  ];
+}
+
+
+// ======================================================
 // START
 // ======================================================
 
@@ -613,7 +637,7 @@ async function addCommand(
   data.users[userId].state = {
 
     step:
-      "waiting_name"
+      "waiting_type"
   };
 
   updateActivity(
@@ -631,9 +655,11 @@ async function addCommand(
     env,
     message.chat.id,
 
-    "📖 <b>إضافة عمل جديد</b>\n\n" +
+    "➕ <b>إضافة عمل جديد</b>\n\n" +
 
-    "أرسل اسم الرواية أو العمل:"
+    "اختر نوع العمل:",
+
+    workTypeKeyboard()
   );
 }
 
@@ -681,6 +707,8 @@ async function listCommand(
 
       text +=
         `${index + 1}. <b>${escapeHtml(work.name)}</b>\n` +
+
+        `🏷️ النوع: ${escapeHtml(work.type || "رواية")}\n` +
 
         `🔢 آخر فصل: ${work.last_chapter}\n` +
 
@@ -745,6 +773,7 @@ async function handleCallback(
     chatId
   );
 
+
   // ==========================================
   // ADD
   // ==========================================
@@ -757,7 +786,9 @@ async function handleCallback(
     );
 
     data.users[chatId].state = {
-      step: "waiting_name"
+
+      step:
+        "waiting_type"
     };
 
     await saveData(
@@ -770,8 +801,74 @@ async function handleCallback(
       env,
       chatId,
 
-      "📖 <b>إضافة عمل جديد</b>\n\n" +
-      "أرسل اسم الرواية أو العمل:"
+      "➕ <b>إضافة عمل جديد</b>\n\n" +
+
+      "اختر نوع العمل:",
+
+      workTypeKeyboard()
+    );
+
+    return;
+  }
+
+
+  // ==========================================
+  // WORK TYPE
+  // ==========================================
+
+  if (
+    action === "type_novel" ||
+    action === "type_manga" ||
+    action === "type_manhwa" ||
+    action === "type_manhua"
+  ) {
+
+    const types = {
+
+      type_novel:
+        "رواية",
+
+      type_manga:
+        "مانجا",
+
+      type_manhwa:
+        "مانهوا",
+
+      type_manhua:
+        "مانها"
+    };
+
+    const selectedType =
+      types[action];
+
+    data.users[chatId].state = {
+
+      step:
+        "waiting_name",
+
+      type:
+        selectedType
+    };
+
+    await answerCallback(
+      env,
+      callback.id,
+      `تم اختيار: ${selectedType}`
+    );
+
+    await saveData(
+      env,
+      data,
+      sha
+    );
+
+    await sendMessage(
+      env,
+      chatId,
+
+      `🏷️ <b>نوع العمل:</b> ${selectedType}\n\n` +
+
+      "✏️ الآن أرسل اسم العمل:"
     );
 
     return;
@@ -1117,6 +1214,7 @@ async function handleMessage(
     chatId
   );
 
+
   // ==========================================
   // START
   // ==========================================
@@ -1286,6 +1384,28 @@ async function handleMessage(
 
 
   // ==========================================
+  // WAITING FOR TYPE
+  // ==========================================
+
+  if (
+    user.state.step ===
+    "waiting_type"
+  ) {
+
+    await sendMessage(
+      env,
+      chatId,
+
+      "🏷️ <b>اختر نوع العمل أولًا:</b>",
+
+      workTypeKeyboard()
+    );
+
+    return;
+  }
+
+
+  // ==========================================
   // WAITING FOR NAME
   // ==========================================
 
@@ -1294,10 +1414,25 @@ async function handleMessage(
     "waiting_name"
   ) {
 
+    if (!text) {
+
+      await sendMessage(
+        env,
+        chatId,
+
+        "❌ أرسل اسم العمل."
+      );
+
+      return;
+    }
+
     user.state = {
 
       step:
         "waiting_url",
+
+      type:
+        user.state.type,
 
       name:
         text
@@ -1390,6 +1525,9 @@ async function handleMessage(
       step:
         "waiting_chapter",
 
+      type:
+        user.state.type,
+
       name:
         user.state.name,
 
@@ -1425,8 +1563,11 @@ async function handleMessage(
     "waiting_chapter"
   ) {
 
+    const normalizedText =
+      normalizeDigits(text);
+
     const chapter =
-      Number(text);
+      Number(normalizedText);
 
     if (
       !Number.isInteger(chapter) ||
@@ -1447,7 +1588,7 @@ async function handleMessage(
     user.works.push({
 
       type:
-        "novel",
+        user.state.type,
 
       name:
         user.state.name,
@@ -1461,6 +1602,9 @@ async function handleMessage(
 
     const workName =
       user.state.name;
+
+    const workType =
+      user.state.type;
 
     user.state =
       null;
@@ -1476,6 +1620,8 @@ async function handleMessage(
       chatId,
 
       `✅ <b>تمت إضافة العمل بنجاح!</b>\n\n` +
+
+      `🏷️ النوع: ${escapeHtml(workType)}\n` +
 
       `📖 ${escapeHtml(workName)}\n` +
 
@@ -1502,6 +1648,34 @@ async function handleMessage(
       sha
     );
   }
+}
+
+
+// ======================================================
+// NORMALIZE ARABIC DIGITS
+// ======================================================
+
+function normalizeDigits(
+  text
+) {
+
+  return String(text)
+    .replace(
+      /[٠-٩]/g,
+      digit =>
+        String(
+          "٠١٢٣٤٥٦٧٨٩"
+            .indexOf(digit)
+        )
+    )
+    .replace(
+      /[۰-۹]/g,
+      digit =>
+        String(
+          "۰۱۲۳۴۵۶۷۸۹"
+            .indexOf(digit)
+        )
+    );
 }
 
 
@@ -1655,7 +1829,7 @@ async function showAllWorks(
 
         `📖 <b>الاسم:</b> ${escapeHtml(work.name)}\n` +
 
-        `🏷️ <b>النوع:</b> ${escapeHtml(work.type || "novel")}\n` +
+        `🏷️ <b>النوع:</b> ${escapeHtml(work.type || "رواية")}\n` +
 
         `🔢 <b>آخر فصل:</b> ${work.last_chapter}\n` +
 
