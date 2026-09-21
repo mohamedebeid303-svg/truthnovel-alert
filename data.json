@@ -1,3 +1,10 @@
 {
-  "users": {}
+  "users": {
+    "805162451": {
+      "works": [],
+      "state": {
+        "step": "waiting_type"
+      }
+    }
+  }
 }
