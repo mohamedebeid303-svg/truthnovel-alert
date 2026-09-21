@@ -3,8 +3,9 @@
     "805162451": {
       "works": [],
       "state": {
-        "step": "waiting_name",
-        "type": "رواية"
+        "step": "waiting_url",
+        "type": "رواية",
+        "name": "Lord Of Th Truth"
       }
     }
   }
