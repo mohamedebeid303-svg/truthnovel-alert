@@ -21,7 +21,7 @@ export default {
       if (request.method !== "POST") {
 
         return new Response(
-          "TruthNovel Bot is running.",
+          "Sandrone Bot is running.",
           {
             status: 200
           }
@@ -30,7 +30,7 @@ export default {
 
       const update = await request.json();
 
-      // تحديث أوامر Telegram تلقائيًا عند الحاجة
+      // تحديث أوامر Telegram تلقائيًا
       await ensureBotCommands(env);
 
       // Callback buttons
@@ -61,7 +61,7 @@ export default {
     } catch (error) {
 
       console.error(
-        "WORKER ERROR:",
+        "SANDRONE WORKER ERROR:",
         error
       );
 
@@ -78,14 +78,6 @@ export default {
 // ======================================================
 
 async function ensureBotCommands(env) {
-
-  /*
-   * نستخدم KV إن كان متاحًا لتجنب إعادة إرسال
-   * الأوامر إلى Telegram مع كل رسالة.
-   *
-   * إذا لم يكن لديك KV، سيعمل البوت أيضًا،
-   * وسيتم ضبط الأوامر عند /start أو /admin.
-   */
 
   try {
 
@@ -119,6 +111,7 @@ async function ensureBotCommands(env) {
         },
 
         body: JSON.stringify({
+
           commands: commands,
 
           scope: {
@@ -199,7 +192,7 @@ async function loadData(env) {
             "2022-11-28",
 
           "User-Agent":
-            "TruthNovel-Bot"
+            "Sandrone-Bot"
         }
       }
     );
@@ -315,13 +308,13 @@ async function saveData(
             "2022-11-28",
 
           "User-Agent":
-            "TruthNovel-Bot"
+            "Sandrone-Bot"
         },
 
         body: JSON.stringify({
 
           message:
-            "Update bot data",
+            "Update Sandrone bot data",
 
           content:
             encoded,
@@ -587,12 +580,12 @@ async function startCommand(
     env,
     message.chat.id,
 
-    "👋 <b>مرحبًا بك في TruthNovel Alert</b>\n\n" +
+    "👋 <b>مرحبًا بك في Sandrone</b>\n\n" +
 
     "سأساعدك في مراقبة أعمالك وإعلامك عند صدور فصل جديد.\n\n" +
 
     "اختر أحد الخيارات من القائمة:",
-    
+
     mainKeyboard()
   );
 }
@@ -1119,14 +1112,13 @@ async function handleMessage(
   const isAdminUser =
     isAdmin(chatId);
 
-  const isNewUser =
-    ensureUser(
-      data,
-      chatId
-    );
+  ensureUser(
+    data,
+    chatId
+  );
 
   // ==========================================
-  // COMMANDS
+  // START
   // ==========================================
 
   if (
@@ -1143,6 +1135,10 @@ async function handleMessage(
     return;
   }
 
+
+  // ==========================================
+  // ADMIN
+  // ==========================================
 
   if (
     text === "/admin"
@@ -1257,18 +1253,6 @@ async function handleMessage(
 
 
   // ==========================================
-  // ADMIN COMMAND
-  // ==========================================
-
-  if (
-    text === "/admin"
-  ) {
-
-    return;
-  }
-
-
-  // ==========================================
   // USER STATE
   // ==========================================
 
@@ -1363,7 +1347,6 @@ async function handleMessage(
       return;
     }
 
-    // محاولة التأكد من أن الرابط يعمل
     try {
 
       const response =
@@ -1498,7 +1481,7 @@ async function handleMessage(
 
       `🔢 آخر فصل: ${chapter}\n\n` +
 
-      `سأحتفظ به ضمن قائمتك.`
+      `سيحتفظ Sandrone بهذا العمل ضمن قائمتك.`
     );
 
     return;
@@ -1583,7 +1566,7 @@ async function adminPanel(
 
   const text =
 
-    "🛠️ <b>لوحة تحكم TruthNovel</b>\n\n" +
+    "🛠️ <b>لوحة تحكم Sandrone</b>\n\n" +
 
     `👥 إجمالي المستخدمين: <b>${users.length}</b>\n` +
 
@@ -1712,9 +1695,9 @@ async function broadcastMaintenance(
 
   const message =
 
-    "🔧 <b>تنبيه صيانة</b>\n\n" +
+    "🔧 <b>تنبيه صيانة Sandrone</b>\n\n" +
 
-    "تم تفعيل وضع الصيانة في TruthNovel Alert.\n\n" +
+    "تم تفعيل وضع الصيانة في Sandrone.\n\n" +
 
     "لن تتمكن من استخدام البوت مؤقتًا حتى انتهاء الصيانة.";
 
