@@ -10,10 +10,11 @@
         }
       ],
       "state": {
-        "step": "waiting_type"
+        "step": "waiting_name",
+        "type": "رواية"
       },
       "first_seen": 1790025835463,
-      "last_active": 1790031608814
+      "last_active": 1790031613229
     },
     "2057656653": {
       "works": [],
