@@ -509,6 +509,31 @@ function isMaintenance(data) {
 
 
 // ======================================================
+// TYPE NAME
+// ======================================================
+
+function getTypeName(type) {
+
+  const types = {
+
+    "رواية":
+      "الرواية",
+
+    "مانجا":
+      "المانجا",
+
+    "مانهوا":
+      "المانهوا",
+
+    "مانها":
+      "المانها"
+  };
+
+  return types[type] || type;
+}
+
+
+// ======================================================
 // MAIN MENU
 // ======================================================
 
@@ -708,10 +733,13 @@ async function listCommand(
       const type =
         work.type || "رواية";
 
+      const typeName =
+        getTypeName(type);
+
       text +=
         `${index + 1}. <b>${escapeHtml(work.name)}</b>\n` +
 
-        `🏷️ النوع: ${escapeHtml(type)}\n` +
+        `🏷️ النوع: ${escapeHtml(typeName)}\n` +
 
         `🔢 آخر فصل: ${work.last_chapter}\n` +
 
@@ -844,6 +872,9 @@ async function handleCallback(
     const selectedType =
       types[action];
 
+    const typeName =
+      getTypeName(selectedType);
+
     data.users[chatId].state = {
 
       step:
@@ -856,7 +887,7 @@ async function handleCallback(
     await answerCallback(
       env,
       callback.id,
-      `تم اختيار: ${selectedType}`
+      `تم اختيار: ${typeName}`
     );
 
     await saveData(
@@ -869,9 +900,9 @@ async function handleCallback(
       env,
       chatId,
 
-      `🏷️ <b>نوع ${escapeHtml(selectedType)}:</b> ${escapeHtml(selectedType)}\n\n` +
+      `🏷️ <b>نوع العمل:</b> ${escapeHtml(typeName)}\n\n` +
 
-      `✏️ الآن أرسل اسم ${escapeHtml(selectedType)}:`
+      `✏️ الآن أرسل اسم ${escapeHtml(typeName)}.`
     );
 
     return;
@@ -936,6 +967,9 @@ async function handleCallback(
     const type =
       work.type || "رواية";
 
+    const typeName =
+      getTypeName(type);
+
     await answerCallback(
       env,
       callback.id
@@ -945,7 +979,7 @@ async function handleCallback(
       env,
       chatId,
 
-      `⚠️ هل أنت متأكد من حذف ${escapeHtml(type)}:\n\n` +
+      `⚠️ هل أنت متأكد من حذف ${escapeHtml(typeName)}:\n\n` +
 
       `<b>${escapeHtml(work.name)}</b>\n\n` +
 
@@ -1014,6 +1048,9 @@ async function handleCallback(
     const type =
       removed.type || "رواية";
 
+    const typeName =
+      getTypeName(type);
+
     await saveData(
       env,
       data,
@@ -1030,7 +1067,7 @@ async function handleCallback(
       env,
       chatId,
 
-      `🗑️ تم حذف ${escapeHtml(type)} ` +
+      `🗑️ تم حذف ${escapeHtml(typeName)} ` +
       `<b>${escapeHtml(removed.name)}</b> من قائمتك.`
     );
 
@@ -1097,7 +1134,7 @@ async function handleCallback(
 
 
   // ==========================================
-  // MAINTENANCE ON/OFF
+  // MAINTENANCE
   // ==========================================
 
   if (
@@ -1429,13 +1466,16 @@ async function handleMessage(
     const type =
       user.state.type;
 
+    const typeName =
+      getTypeName(type);
+
     if (!text) {
 
       await sendMessage(
         env,
         chatId,
 
-        `❌ أرسل اسم ${escapeHtml(type)}.`
+        `❌ أرسل اسم ${escapeHtml(typeName)}.`
       );
 
       return;
@@ -1463,7 +1503,7 @@ async function handleMessage(
       env,
       chatId,
 
-      `🔗 الآن أرسل رابط صفحة ${escapeHtml(type)}.`
+      `🔗 الآن أرسل رابط صفحة ${escapeHtml(typeName)}.`
     );
 
     return;
@@ -1485,6 +1525,9 @@ async function handleMessage(
     const type =
       user.state.type;
 
+    const typeName =
+      getTypeName(type);
+
     if (
       !/^https?:\/\/\S+$/i.test(url)
     ) {
@@ -1494,7 +1537,8 @@ async function handleMessage(
         chatId,
 
         `❌ الرابط غير صحيح.\n\n` +
-        `أرسل رابط صفحة ${escapeHtml(type)} يبدأ بـ <b>http://</b> أو <b>https://</b>.`
+
+        `أرسل رابط صفحة ${escapeHtml(typeName)} يبدأ بـ <b>http://</b> أو <b>https://</b>.`
       );
 
       return;
@@ -1519,7 +1563,8 @@ async function handleMessage(
           chatId,
 
           `⚠️ تمكنت من الوصول إلى الرابط لكن الموقع أعاد حالة غير طبيعية.\n\n` +
-          `إذا كنت متأكدًا من الرابط، أرسل رابط صفحة ${escapeHtml(type)} مرة أخرى.`
+
+          `إذا كنت متأكدًا من الرابط، أرسل رابط صفحة ${escapeHtml(typeName)} مرة أخرى.`
         );
 
         return;
@@ -1531,7 +1576,8 @@ async function handleMessage(
         env,
         chatId,
 
-        `⚠️ لم أتمكن من الوصول إلى رابط ${escapeHtml(type)}.\n\n` +
+        `⚠️ لم أتمكن من الوصول إلى رابط ${escapeHtml(typeName)}.\n\n` +
+
         "تأكد من أن الرابط صحيح ويمكن فتحه."
       );
 
@@ -1565,7 +1611,7 @@ async function handleMessage(
 
       `🔢 ممتاز.\n\n` +
 
-      `أرسل رقم آخر فصل صدر من ${escapeHtml(type)} حاليًا.\n\n` +
+      `أرسل رقم آخر فصل صدر من ${escapeHtml(typeName)} حاليًا.\n\n` +
 
       "مثال: <b>125</b>"
     );
@@ -1586,6 +1632,9 @@ async function handleMessage(
     const type =
       user.state.type;
 
+    const typeName =
+      getTypeName(type);
+
     const normalizedText =
       normalizeDigits(text);
 
@@ -1601,7 +1650,7 @@ async function handleMessage(
         env,
         chatId,
 
-        `❌ أرسل رقم فصل صحيح لـ ${escapeHtml(type)}.\n\n` +
+        `❌ أرسل رقم فصل صحيح لـ ${escapeHtml(typeName)}.\n\n` +
 
         "مثال: <b>125</b>"
       );
@@ -1640,13 +1689,13 @@ async function handleMessage(
       env,
       chatId,
 
-      `✅ <b>تمت إضافة ${escapeHtml(type)} بنجاح!</b>\n\n` +
+      `✅ <b>تمت إضافة ${escapeHtml(typeName)} بنجاح!</b>\n\n` +
 
       `📖 ${escapeHtml(workName)}\n` +
 
       `🔢 آخر فصل: ${chapter}\n\n` +
 
-      `سيحتفظ Sandrone بهذه ${escapeHtml(type)} ضمن قائمتك.`
+      `سيحتفظ Sandrone بهذه ${escapeHtml(typeName)} ضمن قائمتك.`
     );
 
     return;
@@ -1847,13 +1896,16 @@ async function showAllWorks(
       const type =
         work.type || "رواية";
 
+      const typeName =
+        getTypeName(type);
+
       text +=
 
         `👤 <b>المستخدم:</b> ${escapeHtml(userId)}\n` +
 
         `📖 <b>الاسم:</b> ${escapeHtml(work.name)}\n` +
 
-        `🏷️ <b>النوع:</b> ${escapeHtml(type)}\n` +
+        `🏷️ <b>النوع:</b> ${escapeHtml(typeName)}\n` +
 
         `🔢 <b>آخر فصل:</b> ${work.last_chapter}\n` +
 
