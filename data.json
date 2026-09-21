@@ -16,12 +16,11 @@
         }
       ],
       "state": {
-        "step": "waiting_url",
-        "type": "مانجا",
-        "name": "بةهب٨ببو"
+        "step": "waiting_name",
+        "type": "رواية"
       },
       "first_seen": 1790025835463,
-      "last_active": 1790032883363
+      "last_active": 1790032891771
     },
     "2057656653": {
       "works": [],
