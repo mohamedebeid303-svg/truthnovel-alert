@@ -10,6 +10,12 @@
         }
       ],
       "state": null
+    },
+    "5794991077": {
+      "works": [],
+      "state": {
+        "step": "waiting_type"
+      }
     }
   }
 }
