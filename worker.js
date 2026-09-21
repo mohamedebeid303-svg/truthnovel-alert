@@ -739,7 +739,7 @@ async function listCommand(
       text +=
         `${index + 1}. <b>${escapeHtml(work.name)}</b>\n` +
 
-        `🏷️ النوع: ${escapeHtml(typeName)}\n` +
+        `🏷️ النوع: ${escapeHtml(type)}\n` +
 
         `🔢 آخر فصل: ${work.last_chapter}\n` +
 
@@ -887,7 +887,7 @@ async function handleCallback(
     await answerCallback(
       env,
       callback.id,
-      `تم اختيار: ${typeName}`
+      `تم اختيار: ${selectedType}`
     );
 
     await saveData(
@@ -900,7 +900,7 @@ async function handleCallback(
       env,
       chatId,
 
-      `🏷️ <b>نوع العمل:</b> ${escapeHtml(typeName)}\n\n` +
+      `🏷️ <b>نوع العمل:</b> ${escapeHtml(selectedType)}\n\n` +
 
       `✏️ الآن أرسل اسم ${escapeHtml(typeName)}.`
     );
@@ -1905,7 +1905,7 @@ async function showAllWorks(
 
         `📖 <b>الاسم:</b> ${escapeHtml(work.name)}\n` +
 
-        `🏷️ <b>النوع:</b> ${escapeHtml(typeName)}\n` +
+        `🏷️ <b>النوع:</b> ${escapeHtml(type)}\n` +
 
         `🔢 <b>آخر فصل:</b> ${work.last_chapter}\n` +
 
