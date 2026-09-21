@@ -1,128 +1,323 @@
 import os
 import re
+import json
 import requests
 from bs4 import BeautifulSoup
 
 SITE_URL = "https://truthnovel.top/"
 LAST_CHAPTER_FILE = "last_chapter.txt"
+DATA_FILE = "data.json"
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-CHAT_ID = "805162451"
 
-TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-
-
-def get_last_chapter():
-    with open(LAST_CHAPTER_FILE, "r", encoding="utf-8") as file:
-        return int(file.read().strip())
+TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 
-def save_last_chapter(chapter_number):
-    with open(LAST_CHAPTER_FILE, "w", encoding="utf-8") as file:
-        file.write(str(chapter_number))
+# =========================
+# Data
+# =========================
 
-
-def get_chapters():
-    response = requests.get(
-        SITE_URL,
-        timeout=30,
-        headers={
-            "User-Agent": "Mozilla/5.0"
+def load_data():
+    if not os.path.exists(DATA_FILE):
+        return {
+            "users": {},
+            "update_offset": 0
         }
-    )
-    response.raise_for_status()
 
-    soup = BeautifulSoup(response.text, "html.parser")
+    with open(DATA_FILE, "r", encoding="utf-8") as file:
+        data = json.load(file)
 
-    chapters = []
+    data.setdefault("users", {})
+    data.setdefault("update_offset", 0)
 
-    for link in soup.find_all("a", href=True):
-        text = link.get_text(" ", strip=True)
-
-        match = re.match(r"^(\d+)\s*[-–—]\s*(.+)$", text)
-
-        if not match:
-            continue
-
-        chapter_number = int(match.group(1))
-        title = match.group(2).strip()
-        chapter_url = link["href"]
-
-        if chapter_url.startswith("/"):
-            chapter_url = "https://truthnovel.top" + chapter_url
-        elif chapter_url.startswith("http://"):
-            chapter_url = chapter_url.replace("http://", "https://", 1)
-
-        chapters.append({
-            "number": chapter_number,
-            "title": title,
-            "url": chapter_url
-        })
-
-    unique_chapters = {}
-
-    for chapter in chapters:
-        unique_chapters[chapter["number"]] = chapter
-
-    return sorted(
-        unique_chapters.values(),
-        key=lambda chapter: chapter["number"]
-    )
+    return data
 
 
-def send_telegram_message(chapter):
-    message = (
-        "🔔 فصل جديد من سيد الحقيقة!\n\n"
-        f"📖 الفصل: {chapter['number']}\n"
-        f"📝 العنوان: {chapter['title']}\n\n"
-        f"🔗 {chapter['url']}"
-    )
+def save_data(data):
+    with open(DATA_FILE, "w", encoding="utf-8") as file:
+        json.dump(data, file, ensure_ascii=False, indent=2)
+
+
+# =========================
+# Telegram
+# =========================
+
+def send_message(chat_id, text, keyboard=None):
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": False
+    }
+
+    if keyboard:
+        payload["reply_markup"] = json.dumps(keyboard, ensure_ascii=False)
 
     response = requests.post(
-        TELEGRAM_URL,
-        data={
-            "chat_id": CHAT_ID,
-            "text": message,
-            "disable_web_page_preview": False
-        },
+        f"{TELEGRAM_API}/sendMessage",
+        data=payload,
         timeout=30
     )
 
     response.raise_for_status()
 
 
-def main():
-    last_chapter = get_last_chapter()
-    chapters = get_chapters()
-
-    if not chapters:
-        print("لم يتم العثور على أي فصول.")
-        return
-
-    new_chapters = [
-        chapter
-        for chapter in chapters
-        if chapter["number"] > last_chapter
-    ]
-
-    if not new_chapters:
-        print(f"لا توجد فصول جديدة. آخر فصل: {last_chapter}")
-        return
-
-    print(
-        f"تم العثور على {len(new_chapters)} فصل/فصول جديدة "
-        f"ابتداءً من {new_chapters[0]['number']}."
+def get_updates(offset):
+    response = requests.get(
+        f"{TELEGRAM_API}/getUpdates",
+        params={
+            "offset": offset,
+            "timeout": 5
+        },
+        timeout=15
     )
 
-    for chapter in new_chapters:
-        print(f"إرسال الفصل {chapter['number']}...")
-        send_telegram_message(chapter)
-
-    newest_chapter = new_chapters[-1]["number"]
-    save_last_chapter(newest_chapter)
-
-    print(f"تم الحفظ. آخر فصل الآن: {newest_chapter}")
+    response.raise_for_status()
+    return response.json()["result"]
 
 
-if __name__ == "__main__":
-    main()
+# =========================
+# Add workflow
+# =========================
+
+def type_keyboard():
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "📖 رواية", "callback_data": "type_رواية"},
+                {"text": "🇯🇵 مانجا", "callback_data": "type_مانجا"}
+            ],
+            [
+                {"text": "🇨🇳 مانها", "callback_data": "type_مانها"},
+                {"text": "🇰🇷 مانهوا", "callback_data": "type_مانهوا"}
+            ]
+        ]
+    }
+
+
+def start_add(chat_id, data):
+    user_id = str(chat_id)
+
+    data["users"].setdefault(
+        user_id,
+        {
+            "works": [],
+            "state": None
+        }
+    )
+
+    data["users"][user_id]["state"] = {
+        "step": "waiting_type"
+    }
+
+    save_data(data)
+
+    send_message(
+        chat_id,
+        "📚 اختر نوع العمل:",
+        type_keyboard()
+    )
+
+
+def handle_callback(update, data):
+    query = update["callback_query"]
+
+    chat_id = query["message"]["chat"]["id"]
+    user_id = str(chat_id)
+
+    callback_data = query["data"]
+
+    if not callback_data.startswith("type_"):
+        return
+
+    work_type = callback_data.replace("type_", "", 1)
+
+    data["users"].setdefault(
+        user_id,
+        {
+            "works": [],
+            "state": None
+        }
+    )
+
+    data["users"][user_id]["state"] = {
+        "step": "waiting_name",
+        "type": work_type
+    }
+
+    save_data(data)
+
+    requests.post(
+        f"{TELEGRAM_API}/answerCallbackQuery",
+        data={
+            "callback_query_id": query["id"]
+        },
+        timeout=30
+    )
+
+    send_message(
+        chat_id,
+        f"✅ تم اختيار: {work_type}\n\n"
+        "✏️ الآن أرسل اسم العمل:"
+    )
+
+
+def check_url(url):
+    try:
+        response = requests.get(
+            url,
+            timeout=20,
+            headers={
+                "User-Agent": "Mozilla/5.0"
+            },
+            allow_redirects=True
+        )
+
+        return response.status_code < 400, response.status_code
+
+    except requests.RequestException:
+        return False, None
+
+
+def handle_text_message(message, data):
+    chat_id = message["chat"]["id"]
+    user_id = str(chat_id)
+    text = message.get("text", "").strip()
+
+    data["users"].setdefault(
+        user_id,
+        {
+            "works": [],
+            "state": None
+        }
+    )
+
+    user = data["users"][user_id]
+
+    # =========================
+    # Commands
+    # =========================
+
+    if text == "/start":
+        send_message(
+            chat_id,
+            "👋 أهلاً بك!\n\n"
+            "استخدم /add لإضافة رواية أو مانجا أو مانها أو مانهوا إلى التنبيهات."
+        )
+        return
+
+    if text == "/add":
+        start_add(chat_id, data)
+        return
+
+    # =========================
+    # Add process
+    # =========================
+
+    state = user.get("state")
+
+    if not state:
+        return
+
+    step = state.get("step")
+
+    # ---- Name ----
+
+    if step == "waiting_name":
+        state["name"] = text
+        state["step"] = "waiting_url"
+
+        save_data(data)
+
+        send_message(
+            chat_id,
+            "🔗 أرسل الآن رابط العمل أو الصفحة التي تريد مراقبتها:"
+        )
+        return
+
+    # ---- URL ----
+
+    if step == "waiting_url":
+
+        if not re.match(r"^https?://", text, re.IGNORECASE):
+            send_message(
+                chat_id,
+                "❌ الرابط غير صحيح.\n\n"
+                "يجب أن يبدأ الرابط بـ:\n"
+                "https:// أو http://\n\n"
+                "🔗 أرسل الرابط مرة أخرى:"
+            )
+            return
+
+        send_message(
+            chat_id,
+            "🔍 جارٍ فحص الرابط...\n\n"
+            "انتظر قليلًا."
+        )
+
+        accessible, status_code = check_url(text)
+
+        if not accessible:
+            send_message(
+                chat_id,
+                "❌ لا أستطيع الوصول إلى هذا الرابط.\n\n"
+                "تأكد من أن الرابط صحيح ويمكن فتحه، ثم أرسله مرة أخرى."
+            )
+            return
+
+        state["url"] = text
+        state["step"] = "waiting_chapter"
+
+        save_data(data)
+
+        send_message(
+            chat_id,
+            "✅ تمكنت من الوصول إلى الصفحة بنجاح.\n\n"
+            f"📖 الاسم: {state['name']}\n"
+            f"🏷️ النوع: {state['type']}\n"
+            f"🔗 الرابط: {text}\n\n"
+            "🔢 الآن أرسل رقم آخر فصل صدر حاليًا:"
+        )
+        return
+
+    # ---- Last chapter ----
+
+    if step == "waiting_chapter":
+
+        if not text.isdigit():
+            send_message(
+                chat_id,
+                "❌ أرسل رقم الفصل فقط.\n\n"
+                "مثال:\n"
+                "187"
+            )
+            return
+
+        last_chapter = int(text)
+
+        work = {
+            "name": state["name"],
+            "type": state["type"],
+            "url": state["url"],
+            "last_chapter": last_chapter
+        }
+
+        user["works"].append(work)
+
+        user["state"] = None
+
+        save_data(data)
+
+        send_message(
+            chat_id,
+            "✅ تمت إضافة العمل بنجاح!\n\n"
+            f"📖 {work['name']}\n"
+            f"🏷️ النوع: {work['type']}\n"
+            f"🔢 آخر فصل: {work['last_chapter']}\n\n"
+            f"🔔 ستبدأ المراقبة من الفصل {last_chapter + 1}."
+        )
+
+        return
+
+
+# =========================
+# Telegram messages
