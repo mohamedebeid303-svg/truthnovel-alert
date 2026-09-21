@@ -428,16 +428,6 @@ async function deletePreviousBotMessage(
 // ======================================================
 // TELEGRAM SEND MESSAGE
 // ======================================================
-//
-// إذا تم تمرير data:
-// الرسالة تعتبر رسالة عادية للمستخدم
-// وسيتم حذف الرسالة العادية السابقة.
-//
-// إذا لم يتم تمرير data:
-// الرسالة تعتبر رسالة إدارية/نظامية
-// ولن تدخل في نظام الحذف.
-//
-// ======================================================
 
 async function sendMessage(
   env,
@@ -522,7 +512,6 @@ async function sendMessage(
     return null;
   }
 
-  // حفظ ID الرسالة العادية فقط
   if (
     isNormalMessage &&
     result &&
@@ -613,7 +602,6 @@ function ensureUser(
     return true;
   }
 
-  // إضافة المتغير للمستخدمين القدامى
   if (
     !Object.prototype.hasOwnProperty.call(
       data.users[userId],
@@ -1427,11 +1415,6 @@ async function handleCallback(
       callback.id
     );
 
-    // مهم:
-    // لا نمرر data هنا
-    // حتى لا تدخل رسالة لوحة التحكم
-    // في نظام الحذف
-
     await adminPanel(
       chatId,
       env,
@@ -1485,7 +1468,6 @@ async function handleCallback(
         data
       );
 
-      // رسالة إدارية
       await sendMessage(
 
         env,
@@ -1499,7 +1481,6 @@ async function handleCallback(
 
     } else {
 
-      // رسالة إدارية
       await sendMessage(
 
         env,
@@ -1549,11 +1530,68 @@ async function handleCallback(
       callback.id
     );
 
-    // رسالة إدارية
     await showAllWorks(
       chatId,
       env,
       data
+    );
+
+    return;
+  }
+
+
+  // ==================================================
+  // ADMIN BROADCAST
+  // ==================================================
+
+  if (
+    action === "admin_broadcast"
+  ) {
+
+    if (!isAdmin(chatId)) {
+
+      await answerCallback(
+
+        env,
+
+        callback.id,
+
+        "غير مصرح."
+      );
+
+      return;
+    }
+
+    data.users[chatId].state = {
+
+      step:
+        "admin_broadcast"
+    };
+
+    await answerCallback(
+      env,
+      callback.id
+    );
+
+    await sendMessage(
+
+      env,
+
+      chatId,
+
+      "📢 <b>إرسال رسالة جماعية</b>\n\n" +
+
+      "اكتب الآن الرسالة التي تريد إرسالها لجميع مستخدمي البوت.\n\n" +
+
+      "❌ للإلغاء أرسل /cancel",
+
+      null
+    );
+
+    await saveData(
+      env,
+      data,
+      sha
     );
 
     return;
@@ -1624,7 +1662,6 @@ async function handleMessage(
 
     if (!isAdminUser) {
 
-      // رسالة عادية للمستخدم
       await sendMessage(
 
         env,
@@ -1647,8 +1684,6 @@ async function handleMessage(
       return;
     }
 
-    // لوحة المبرمج
-    // لا تمرر data
     await adminPanel(
 
       chatId,
@@ -1656,6 +1691,102 @@ async function handleMessage(
       env,
 
       data
+    );
+
+    return;
+  }
+
+
+  // ==================================================
+  // CANCEL BROADCAST
+  // ==================================================
+
+  if (
+    isAdminUser &&
+    text === "/cancel"
+  ) {
+
+    const adminState =
+      data.users[chatId].state;
+
+    if (
+      adminState &&
+      adminState.step ===
+      "admin_broadcast"
+    ) {
+
+      data.users[chatId].state =
+        null;
+
+      await sendMessage(
+
+        env,
+
+        chatId,
+
+        "❌ تم إلغاء الرسالة الجماعية."
+      );
+
+      await saveData(
+        env,
+        data,
+        sha
+      );
+
+      return;
+    }
+  }
+
+
+  // ==================================================
+  // ADMIN BROADCAST MESSAGE
+  // ==================================================
+
+  if (
+    isAdminUser &&
+    data.users[chatId].state &&
+    data.users[chatId].state.step ===
+    "admin_broadcast"
+  ) {
+
+    if (!text) {
+
+      await sendMessage(
+
+        env,
+
+        chatId,
+
+        "❌ أرسل نص الرسالة الجماعية.\n\n" +
+
+        "أو أرسل /cancel للإلغاء."
+      );
+
+      return;
+    }
+
+    data.users[chatId].state =
+      null;
+
+    await saveData(
+      env,
+      data,
+      sha
+    );
+
+    await sendBroadcastMessage(
+      env,
+      data,
+      text
+    );
+
+    await sendMessage(
+
+      env,
+
+      chatId,
+
+      "✅ <b>تم إرسال الرسالة الجماعية.</b>"
     );
 
     return;
@@ -2270,20 +2401,22 @@ async function adminPanel(
   const maintenance =
     isMaintenance(data);
 
+  const botStatus =
+    maintenance
+      ? "🔴 في وضع الصيانة"
+      : "🟢 يعمل";
+
   const text =
 
     "🛠️ <b>لوحة تحكم Sandrone</b>\n\n" +
 
-    `👥 إجمالي المستخدمين: <b>${users.length}</b>\n` +
+    `🤖 حالة البوت: <b>${botStatus}</b>\n\n` +
+
+    `👥 إجمالي المشتركين: <b>${users.length}</b>\n` +
 
     `🟢 المستخدمون النشطون: <b>${activeUsers}</b>\n` +
 
-    `📚 إجمالي الأعمال المراقبة: <b>${totalWorks}</b>\n\n` +
-
-    `🔧 وضع الصيانة: <b>${maintenance ? "🔴 مفعّل" : "🟢 متوقف"}</b>`;
-
-  // لا نمرر data هنا
-  // لأن هذه رسالة إدارية
+    `📚 إجمالي الأعمال المراقبة: <b>${totalWorks}</b>`;
 
   await sendMessage(
 
@@ -2303,6 +2436,18 @@ async function adminPanel(
 
           callback_data:
             "admin_works"
+        }
+
+      ],
+
+      [
+
+        {
+          text:
+            "📢 رسالة جماعية",
+
+          callback_data:
+            "admin_broadcast"
         }
 
       ],
@@ -2408,7 +2553,6 @@ async function showAllWorks(
       `📊 <b>الإجمالي: ${total}</b>`;
   }
 
-  // رسالة إدارية
   await sendMessage(
     env,
     chatId,
@@ -2451,10 +2595,6 @@ async function broadcastMaintenance(
 
     try {
 
-      // رسالة نظامية
-      // لا نحذف الرسالة السابقة
-      // ولا نسجلها كآخر رسالة عادية
-
       await sendMessage(
 
         env,
@@ -2476,6 +2616,87 @@ async function broadcastMaintenance(
       );
     }
   }
+}
+
+
+// ======================================================
+// GENERAL BROADCAST
+// ======================================================
+
+async function sendBroadcastMessage(
+  env,
+  data,
+  message
+) {
+
+  let sent =
+    0;
+
+  let failed =
+    0;
+
+  for (
+    const userId of
+    Object.keys(
+      data.users || {}
+    )
+  ) {
+
+    if (
+      String(userId) ===
+      String(ADMIN_CHAT_ID)
+    ) {
+
+      continue;
+    }
+
+    try {
+
+      const result =
+        await sendMessage(
+
+          env,
+
+          userId,
+
+          message
+        );
+
+      if (
+        result &&
+        result.ok
+      ) {
+
+        sent++;
+
+      } else {
+
+        failed++;
+      }
+
+    } catch (error) {
+
+      failed++;
+
+      console.error(
+
+        "Broadcast message error:",
+
+        userId,
+
+        error
+      );
+    }
+  }
+
+  console.log(
+    `Broadcast finished. Sent: ${sent}, Failed: ${failed}`
+  );
+
+  return {
+    sent,
+    failed
+  };
 }
 
 
