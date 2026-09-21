@@ -705,10 +705,13 @@ async function listCommand(
   user.works.forEach(
     (work, index) => {
 
+      const type =
+        work.type || "رواية";
+
       text +=
         `${index + 1}. <b>${escapeHtml(work.name)}</b>\n` +
 
-        `🏷️ النوع: ${escapeHtml(work.type || "رواية")}\n` +
+        `🏷️ النوع: ${escapeHtml(type)}\n` +
 
         `🔢 آخر فصل: ${work.last_chapter}\n` +
 
@@ -866,9 +869,9 @@ async function handleCallback(
       env,
       chatId,
 
-      `🏷️ <b>نوع العمل:</b> ${selectedType}\n\n` +
+      `🏷️ <b>نوع ${escapeHtml(selectedType)}:</b> ${escapeHtml(selectedType)}\n\n` +
 
-      "✏️ الآن أرسل اسم العمل:"
+      `✏️ الآن أرسل اسم ${escapeHtml(selectedType)}:`
     );
 
     return;
@@ -930,6 +933,9 @@ async function handleCallback(
     const work =
       user.works[index];
 
+    const type =
+      work.type || "رواية";
+
     await answerCallback(
       env,
       callback.id
@@ -939,8 +945,10 @@ async function handleCallback(
       env,
       chatId,
 
-      `⚠️ هل أنت متأكد من حذف:\n\n` +
+      `⚠️ هل أنت متأكد من حذف ${escapeHtml(type)}:\n\n` +
+
       `<b>${escapeHtml(work.name)}</b>\n\n` +
+
       `سيتم إزالته من قائمتك فقط.`,
 
       [
@@ -1003,6 +1011,9 @@ async function handleCallback(
         1
       )[0];
 
+    const type =
+      removed.type || "رواية";
+
     await saveData(
       env,
       data,
@@ -1012,14 +1023,15 @@ async function handleCallback(
     await answerCallback(
       env,
       callback.id,
-      "تم حذف العمل."
+      "تم الحذف."
     );
 
     await sendMessage(
       env,
       chatId,
 
-      `🗑️ تم حذف <b>${escapeHtml(removed.name)}</b> من قائمتك.`
+      `🗑️ تم حذف ${escapeHtml(type)} ` +
+      `<b>${escapeHtml(removed.name)}</b> من قائمتك.`
     );
 
     return;
@@ -1414,13 +1426,16 @@ async function handleMessage(
     "waiting_name"
   ) {
 
+    const type =
+      user.state.type;
+
     if (!text) {
 
       await sendMessage(
         env,
         chatId,
 
-        "❌ أرسل اسم العمل."
+        `❌ أرسل اسم ${escapeHtml(type)}.`
       );
 
       return;
@@ -1432,7 +1447,7 @@ async function handleMessage(
         "waiting_url",
 
       type:
-        user.state.type,
+        type,
 
       name:
         text
@@ -1444,13 +1459,11 @@ async function handleMessage(
       sha
     );
 
-    // استخدام النوع الذي اختاره المستخدم
-    // داخل رسالة طلب الرابط
     await sendMessage(
       env,
       chatId,
 
-      `🔗 الآن أرسل رابط صفحة ${escapeHtml(user.state.type)}.`
+      `🔗 الآن أرسل رابط صفحة ${escapeHtml(type)}.`
     );
 
     return;
@@ -1469,6 +1482,9 @@ async function handleMessage(
     const url =
       text;
 
+    const type =
+      user.state.type;
+
     if (
       !/^https?:\/\/\S+$/i.test(url)
     ) {
@@ -1477,8 +1493,8 @@ async function handleMessage(
         env,
         chatId,
 
-        "❌ الرابط غير صحيح.\n\n" +
-        "أرسل رابطًا يبدأ بـ <b>http://</b> أو <b>https://</b>."
+        `❌ الرابط غير صحيح.\n\n` +
+        `أرسل رابط صفحة ${escapeHtml(type)} يبدأ بـ <b>http://</b> أو <b>https://</b>.`
       );
 
       return;
@@ -1502,8 +1518,8 @@ async function handleMessage(
           env,
           chatId,
 
-          "⚠️ تمكنت من الوصول إلى الرابط لكن الموقع أعاد حالة غير طبيعية.\n\n" +
-          "إذا كنت متأكدًا من الرابط، أرسله مرة أخرى."
+          `⚠️ تمكنت من الوصول إلى الرابط لكن الموقع أعاد حالة غير طبيعية.\n\n` +
+          `إذا كنت متأكدًا من الرابط، أرسل رابط صفحة ${escapeHtml(type)} مرة أخرى.`
         );
 
         return;
@@ -1515,7 +1531,7 @@ async function handleMessage(
         env,
         chatId,
 
-        "⚠️ لم أتمكن من الوصول إلى الرابط.\n\n" +
+        `⚠️ لم أتمكن من الوصول إلى رابط ${escapeHtml(type)}.\n\n` +
         "تأكد من أن الرابط صحيح ويمكن فتحه."
       );
 
@@ -1528,7 +1544,7 @@ async function handleMessage(
         "waiting_chapter",
 
       type:
-        user.state.type,
+        type,
 
       name:
         user.state.name,
@@ -1547,8 +1563,10 @@ async function handleMessage(
       env,
       chatId,
 
-      "🔢 ممتاز.\n\n" +
-      "أرسل رقم آخر فصل صدر حاليًا.\n\n" +
+      `🔢 ممتاز.\n\n` +
+
+      `أرسل رقم آخر فصل صدر من ${escapeHtml(type)} حاليًا.\n\n` +
+
       "مثال: <b>125</b>"
     );
 
@@ -1565,6 +1583,9 @@ async function handleMessage(
     "waiting_chapter"
   ) {
 
+    const type =
+      user.state.type;
+
     const normalizedText =
       normalizeDigits(text);
 
@@ -1580,7 +1601,8 @@ async function handleMessage(
         env,
         chatId,
 
-        "❌ أرسل رقم فصل صحيح.\n\n" +
+        `❌ أرسل رقم فصل صحيح لـ ${escapeHtml(type)}.\n\n` +
+
         "مثال: <b>125</b>"
       );
 
@@ -1590,7 +1612,7 @@ async function handleMessage(
     user.works.push({
 
       type:
-        user.state.type,
+        type,
 
       name:
         user.state.name,
@@ -1605,9 +1627,6 @@ async function handleMessage(
     const workName =
       user.state.name;
 
-    const workType =
-      user.state.type;
-
     user.state =
       null;
 
@@ -1621,15 +1640,13 @@ async function handleMessage(
       env,
       chatId,
 
-      `✅ <b>تمت إضافة العمل بنجاح!</b>\n\n` +
-
-      `🏷️ النوع: ${escapeHtml(workType)}\n` +
+      `✅ <b>تمت إضافة ${escapeHtml(type)} بنجاح!</b>\n\n` +
 
       `📖 ${escapeHtml(workName)}\n` +
 
       `🔢 آخر فصل: ${chapter}\n\n` +
 
-      `سيحتفظ Sandrone بهذا العمل ضمن قائمتك.`
+      `سيحتفظ Sandrone بهذه ${escapeHtml(type)} ضمن قائمتك.`
     );
 
     return;
@@ -1662,6 +1679,7 @@ function normalizeDigits(
 ) {
 
   return String(text)
+
     .replace(
       /[٠-٩]/g,
       digit =>
@@ -1670,6 +1688,7 @@ function normalizeDigits(
             .indexOf(digit)
         )
     )
+
     .replace(
       /[۰-۹]/g,
       digit =>
@@ -1825,13 +1844,16 @@ async function showAllWorks(
 
       total++;
 
+      const type =
+        work.type || "رواية";
+
       text +=
 
         `👤 <b>المستخدم:</b> ${escapeHtml(userId)}\n` +
 
         `📖 <b>الاسم:</b> ${escapeHtml(work.name)}\n` +
 
-        `🏷️ <b>النوع:</b> ${escapeHtml(work.type || "رواية")}\n` +
+        `🏷️ <b>النوع:</b> ${escapeHtml(type)}\n` +
 
         `🔢 <b>آخر فصل:</b> ${work.last_chapter}\n` +
 
@@ -1918,20 +1940,24 @@ function escapeHtml(
 ) {
 
   return String(text)
+
     .replace(
       /&/g,
       "&amp;"
     )
+
     .replace(
       /</g,
       "&lt;"
     )
+
     .replace(
       />/g,
       "&gt;"
     )
+
     .replace(
       /"/g,
       "&quot;"
     );
-} 
+}
