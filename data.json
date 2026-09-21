@@ -14,7 +14,8 @@
     "5794991077": {
       "works": [],
       "state": {
-        "step": "waiting_type"
+        "step": "waiting_name",
+        "type": "مانهوا"
       }
     }
   }
