@@ -1,41 +1,75 @@
 import os
 import re
 import json
+import base64
 import requests
-from bs4 import BeautifulSoup
+from flask import Flask, request
 
-SITE_URL = "https://truthnovel.top/"
-LAST_CHAPTER_FILE = "last_chapter.txt"
-DATA_FILE = "data.json"
+app = Flask(__name__)
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
+
+GITHUB_REPO = "mohamedebeid303-svg/truthnovel-alert"
+DATA_FILE = "data.json"
 
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DATA_FILE}"
 
 
 # =========================
-# Data
+# GitHub Data
 # =========================
 
 def load_data():
-    if not os.path.exists(DATA_FILE):
-        return {
-            "users": {},
-            "update_offset": 0
-        }
+    headers = {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json"
+    }
 
-    with open(DATA_FILE, "r", encoding="utf-8") as file:
-        data = json.load(file)
+    response = requests.get(GITHUB_API, headers=headers, timeout=30)
+    response.raise_for_status()
+
+    result = response.json()
+
+    content = base64.b64decode(result["content"]).decode("utf-8")
+    data = json.loads(content)
 
     data.setdefault("users", {})
-    data.setdefault("update_offset", 0)
 
-    return data
+    return data, result["sha"]
 
 
-def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as file:
-        json.dump(data, file, ensure_ascii=False, indent=2)
+def save_data(data, sha):
+    headers = {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json"
+    }
+
+    content = json.dumps(
+        data,
+        ensure_ascii=False,
+        indent=2
+    )
+
+    encoded = base64.b64encode(
+        content.encode("utf-8")
+    ).decode("utf-8")
+
+    payload = {
+        "message": "Update bot data",
+        "content": encoded,
+        "sha": sha
+    }
+
+    response = requests.put(
+        GITHUB_API,
+        headers=headers,
+        json=payload,
+        timeout=30
+    )
+
+    response.raise_for_status()
 
 
 # =========================
@@ -45,12 +79,14 @@ def save_data(data):
 def send_message(chat_id, text, keyboard=None):
     payload = {
         "chat_id": chat_id,
-        "text": text,
-        "disable_web_page_preview": False
+        "text": text
     }
 
     if keyboard:
-        payload["reply_markup"] = json.dumps(keyboard, ensure_ascii=False)
+        payload["reply_markup"] = json.dumps(
+            keyboard,
+            ensure_ascii=False
+        )
 
     response = requests.post(
         f"{TELEGRAM_API}/sendMessage",
@@ -61,105 +97,50 @@ def send_message(chat_id, text, keyboard=None):
     response.raise_for_status()
 
 
-def get_updates(offset):
-    response = requests.get(
-        f"{TELEGRAM_API}/getUpdates",
-        params={
-            "offset": offset,
-            "timeout": 5
+def answer_callback(callback_id):
+    requests.post(
+        f"{TELEGRAM_API}/answerCallbackQuery",
+        data={
+            "callback_query_id": callback_id
         },
-        timeout=15
+        timeout=30
     )
-
-    response.raise_for_status()
-    return response.json()["result"]
 
 
 # =========================
-# Add workflow
+# Keyboards
 # =========================
 
 def type_keyboard():
     return {
         "inline_keyboard": [
             [
-                {"text": "📖 رواية", "callback_data": "type_رواية"},
-                {"text": "🇯🇵 مانجا", "callback_data": "type_مانجا"}
+                {
+                    "text": "📖 رواية",
+                    "callback_data": "type_رواية"
+                },
+                {
+                    "text": "🇯🇵 مانجا",
+                    "callback_data": "type_مانجا"
+                }
             ],
             [
-                {"text": "🇨🇳 مانها", "callback_data": "type_مانها"},
-                {"text": "🇰🇷 مانهوا", "callback_data": "type_مانهوا"}
+                {
+                    "text": "🇨🇳 مانها",
+                    "callback_data": "type_مانها"
+                },
+                {
+                    "text": "🇰🇷 مانهوا",
+                    "callback_data": "type_مانهوا"
+                }
             ]
         ]
     }
 
 
-def start_add(chat_id, data):
-    user_id = str(chat_id)
-
-    data["users"].setdefault(
-        user_id,
-        {
-            "works": [],
-            "state": None
-        }
-    )
-
-    data["users"][user_id]["state"] = {
-        "step": "waiting_type"
-    }
-
-    save_data(data)
-
-    send_message(
-        chat_id,
-        "📚 اختر نوع العمل:",
-        type_keyboard()
-    )
-
-
-def handle_callback(update, data):
-    query = update["callback_query"]
-
-    chat_id = query["message"]["chat"]["id"]
-    user_id = str(chat_id)
-
-    callback_data = query["data"]
-
-    if not callback_data.startswith("type_"):
-        return
-
-    work_type = callback_data.replace("type_", "", 1)
-
-    data["users"].setdefault(
-        user_id,
-        {
-            "works": [],
-            "state": None
-        }
-    )
-
-    data["users"][user_id]["state"] = {
-        "step": "waiting_name",
-        "type": work_type
-    }
-
-    save_data(data)
-
-    requests.post(
-        f"{TELEGRAM_API}/answerCallbackQuery",
-        data={
-            "callback_query_id": query["id"]
-        },
-        timeout=30
-    )
-
-    send_message(
-        chat_id,
-        f"✅ تم اختيار: {work_type}\n\n"
-        "✏️ الآن أرسل اسم العمل:"
-    )
-
+# =========================
+# URL Check
+# =========================
 
 def check_url(url):
     try:
@@ -172,17 +153,17 @@ def check_url(url):
             allow_redirects=True
         )
 
-        return response.status_code < 400, response.status_code
+        return response.status_code < 400
 
     except requests.RequestException:
-        return False, None
+        return False
 
 
-def handle_text_message(message, data):
-    chat_id = message["chat"]["id"]
-    user_id = str(chat_id)
-    text = message.get("text", "").strip()
+# =========================
+# User
+# =========================
 
+def ensure_user(data, user_id):
     data["users"].setdefault(
         user_id,
         {
@@ -191,27 +172,165 @@ def handle_text_message(message, data):
         }
     )
 
-    user = data["users"][user_id]
 
-    # =========================
-    # Commands
-    # =========================
+# =========================
+# Commands
+# =========================
 
-    if text == "/start":
+def start_add(chat_id, data, sha):
+    user_id = str(chat_id)
+
+    ensure_user(data, user_id)
+
+    data["users"][user_id]["state"] = {
+        "step": "waiting_type"
+    }
+
+    save_data(data, sha)
+
+    send_message(
+        chat_id,
+        "📚 اختر نوع العمل:",
+        type_keyboard()
+    )
+
+
+def show_list(chat_id, data):
+    user_id = str(chat_id)
+
+    ensure_user(data, user_id)
+
+    works = data["users"][user_id]["works"]
+
+    if not works:
         send_message(
             chat_id,
-            "👋 أهلاً بك!\n\n"
-            "استخدم /add لإضافة رواية أو مانجا أو مانها أو مانهوا إلى التنبيهات."
+            "📭 لا توجد أعمال مضافة حتى الآن.\n\n"
+            "استخدم /add لإضافة عمل."
         )
         return
 
-    if text == "/add":
-        start_add(chat_id, data)
+    categories = {
+        "رواية": "📖 الروايات",
+        "مانجا": "🇯🇵 المانجا",
+        "مانها": "🇨🇳 المانها",
+        "مانهوا": "🇰🇷 المانهوا"
+    }
+
+    lines = ["📚 أعمالك:\n"]
+
+    for work_type, title in categories.items():
+
+        selected = [
+            work for work in works
+            if work["type"] == work_type
+        ]
+
+        if not selected:
+            continue
+
+        lines.append(f"\n{title}")
+
+        for i, work in enumerate(selected, 1):
+            lines.append(
+                f"{i}. {work['name']} — الفصل {work['last_chapter']}"
+            )
+
+    send_message(
+        chat_id,
+        "\n".join(lines)
+    )
+
+
+# =========================
+# Callback
+# =========================
+
+def handle_callback(update, data, sha):
+
+    query = update["callback_query"]
+
+    chat_id = query["message"]["chat"]["id"]
+    user_id = str(chat_id)
+
+    callback_data = query["data"]
+
+    answer_callback(query["id"])
+
+    if not callback_data.startswith("type_"):
         return
 
-    # =========================
-    # Add process
-    # =========================
+    work_type = callback_data.replace(
+        "type_",
+        "",
+        1
+    )
+
+    ensure_user(data, user_id)
+
+    data["users"][user_id]["state"] = {
+        "step": "waiting_name",
+        "type": work_type
+    }
+
+    save_data(data, sha)
+
+    send_message(
+        chat_id,
+        f"✅ تم اختيار: {work_type}\n\n"
+        "✏️ الآن أرسل اسم العمل:"
+    )
+
+
+# =========================
+# Text
+# =========================
+
+def handle_text(message, data, sha):
+
+    chat_id = message["chat"]["id"]
+    user_id = str(chat_id)
+
+    text = message.get("text", "").strip()
+
+    ensure_user(data, user_id)
+
+    user = data["users"][user_id]
+
+    # /start
+    if text == "/start":
+
+        send_message(
+            chat_id,
+            "👋 أهلاً بك!\n\n"
+            "📚 هذا البوت يراقب الأعمال التي تضيفها "
+            "ويرسل لك إشعارًا عند صدور فصل جديد.\n\n"
+            "/add — إضافة عمل\n"
+            "/list — عرض أعمالك"
+        )
+
+        return
+
+    # /add
+    if text == "/add":
+
+        start_add(
+            chat_id,
+            data,
+            sha
+        )
+
+        return
+
+    # /list
+    if text == "/list":
+
+        show_list(
+            chat_id,
+            data
+        )
+
+        return
 
     state = user.get("state")
 
@@ -220,104 +339,74 @@ def handle_text_message(message, data):
 
     step = state.get("step")
 
-    # ---- Name ----
+    # =========================
+    # Name
+    # =========================
 
     if step == "waiting_name":
+
         state["name"] = text
         state["step"] = "waiting_url"
 
-        save_data(data)
+        save_data(data, sha)
 
         send_message(
             chat_id,
             "🔗 أرسل الآن رابط العمل أو الصفحة التي تريد مراقبتها:"
         )
+
         return
 
-    # ---- URL ----
+    # =========================
+    # URL
+    # =========================
 
     if step == "waiting_url":
 
-        if not re.match(r"^https?://", text, re.IGNORECASE):
+        if not re.match(
+            r"^https?://",
+            text,
+            re.IGNORECASE
+        ):
+
             send_message(
                 chat_id,
                 "❌ الرابط غير صحيح.\n\n"
-                "يجب أن يبدأ الرابط بـ:\n"
-                "https:// أو http://\n\n"
+                "يجب أن يبدأ بـ https:// أو http://\n\n"
                 "🔗 أرسل الرابط مرة أخرى:"
             )
+
             return
 
         send_message(
             chat_id,
-            "🔍 جارٍ فحص الرابط...\n\n"
-            "انتظر قليلًا."
+            "🔍 جارٍ فحص الرابط..."
         )
 
-        accessible, status_code = check_url(text)
+        if not check_url(text):
 
-        if not accessible:
             send_message(
                 chat_id,
                 "❌ لا أستطيع الوصول إلى هذا الرابط.\n\n"
-                "تأكد من أن الرابط صحيح ويمكن فتحه، ثم أرسله مرة أخرى."
+                "تأكد من أن الرابط صحيح ويمكن الوصول إليه."
             )
+
             return
 
         state["url"] = text
         state["step"] = "waiting_chapter"
 
-        save_data(data)
+        save_data(data, sha)
 
         send_message(
             chat_id,
-            "✅ تمكنت من الوصول إلى الصفحة بنجاح.\n\n"
+            "✅ تمكنت من الوصول إلى الصفحة بنجاح!\n\n"
             f"📖 الاسم: {state['name']}\n"
-            f"🏷️ النوع: {state['type']}\n"
-            f"🔗 الرابط: {text}\n\n"
-            "🔢 الآن أرسل رقم آخر فصل صدر حاليًا:"
-        )
-        return
-
-    # ---- Last chapter ----
-
-    if step == "waiting_chapter":
-
-        if not text.isdigit():
-            send_message(
-                chat_id,
-                "❌ أرسل رقم الفصل فقط.\n\n"
-                "مثال:\n"
-                "187"
-            )
-            return
-
-        last_chapter = int(text)
-
-        work = {
-            "name": state["name"],
-            "type": state["type"],
-            "url": state["url"],
-            "last_chapter": last_chapter
-        }
-
-        user["works"].append(work)
-
-        user["state"] = None
-
-        save_data(data)
-
-        send_message(
-            chat_id,
-            "✅ تمت إضافة العمل بنجاح!\n\n"
-            f"📖 {work['name']}\n"
-            f"🏷️ النوع: {work['type']}\n"
-            f"🔢 آخر فصل: {work['last_chapter']}\n\n"
-            f"🔔 ستبدأ المراقبة من الفصل {last_chapter + 1}."
+            f"🏷️ النوع: {state['type']}\n\n"
+            "🔢 أرسل الآن رقم آخر فصل صدر حاليًا:"
         )
 
         return
 
-
-# =========================
-# Telegram messages
+    # =========================
+    # Chapter
