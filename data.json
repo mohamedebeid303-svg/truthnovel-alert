@@ -16,11 +16,10 @@
         }
       ],
       "state": {
-        "step": "waiting_name",
-        "type": "مانجا"
+        "step": "waiting_type"
       },
       "first_seen": 1790025835463,
-      "last_active": 1790032421099
+      "last_active": 1790032423800
     },
     "2057656653": {
       "works": [],
