@@ -10,11 +10,12 @@
         }
       ],
       "state": {
-        "step": "waiting_type"
+        "step": "waiting_name",
+        "type": "رواية"
       },
       "first_seen": 1790025835463,
-      "last_active": 1790272073366,
-      "last_bot_message_id": 216
+      "last_active": 1790272078603,
+      "last_bot_message_id": 217
     },
     "2057656653": {
       "works": [],
