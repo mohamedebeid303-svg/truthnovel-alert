@@ -9,10 +9,12 @@
           "last_chapter": 2459
         }
       ],
-      "state": null,
+      "state": {
+        "step": "waiting_type"
+      },
       "first_seen": 1790025835463,
-      "last_active": 1790271929097,
-      "last_bot_message_id": 214
+      "last_active": 1790272073366,
+      "last_bot_message_id": 216
     },
     "2057656653": {
       "works": [],
