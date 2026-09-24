@@ -10,12 +10,13 @@
         }
       ],
       "state": {
-        "step": "waiting_name",
-        "type": "رواية"
+        "step": "waiting_url",
+        "type": "رواية",
+        "name": "Worthless Profession: Dragon Tamer"
       },
       "first_seen": 1790025835463,
-      "last_active": 1790214618747,
-      "last_bot_message_id": 201
+      "last_active": 1790214629744,
+      "last_bot_message_id": 203
     },
     "2057656653": {
       "works": [],
