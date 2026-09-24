@@ -10,12 +10,11 @@
         }
       ],
       "state": {
-        "step": "waiting_name",
-        "type": "مانها"
+        "step": "waiting_type"
       },
       "first_seen": 1790025835463,
-      "last_active": 1790214612641,
-      "last_bot_message_id": 199
+      "last_active": 1790214614491,
+      "last_bot_message_id": 200
     },
     "2057656653": {
       "works": [],
