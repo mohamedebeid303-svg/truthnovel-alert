@@ -10,13 +10,14 @@
         }
       ],
       "state": {
-        "step": "waiting_url",
+        "step": "waiting_chapter",
         "type": "رواية",
-        "name": "Worthless Profession: Dragon Tamer"
+        "name": "Worthless Profession: Dragon Tamer",
+        "url": "https://www.divinedaolibrary.com/story/worthless-profession-dragon-tamer/worthless-profession-dragon-tamer-chapter-1152-han-kes-true-strength/"
       },
       "first_seen": 1790025835463,
-      "last_active": 1790214629744,
-      "last_bot_message_id": 203
+      "last_active": 1790214652806,
+      "last_bot_message_id": 205
     },
     "2057656653": {
       "works": [],
