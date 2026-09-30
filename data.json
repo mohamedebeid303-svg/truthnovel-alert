@@ -10,13 +10,14 @@
         }
       ],
       "state": {
-        "step": "waiting_url",
+        "step": "waiting_chapter",
         "type": "رواية",
-        "name": "Lord Of The Truth"
+        "name": "Lord Of The Truth",
+        "url": "https://truthnovel.top/"
       },
       "first_seen": 1790025835463,
-      "last_active": 1790733719601,
-      "last_bot_message_id": 247
+      "last_active": 1790733730127,
+      "last_bot_message_id": 249
     },
     "2057656653": {
       "works": [],
