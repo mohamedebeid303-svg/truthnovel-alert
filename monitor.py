@@ -28,11 +28,7 @@ REQUEST_TIMEOUT = 30
 API_TIMEOUT = 15
 MAX_RETRIES = 3
 
-# عدد صفحات القائمة التي نحاول الوصول إليها
-# عند الحاجة للبحث عن الفصول الجديدة.
 MAX_DISCOVERY_PAGES = 8
-
-# عدد روابط الفصول التي نفحصها كحد أقصى.
 MAX_CHAPTER_LINKS = 80
 
 COMMON_API_PATHS = (
@@ -184,8 +180,8 @@ def request_with_retry(
 
         try:
 
-            # إضافة قيمة متغيرة تمنع بعض أنواع الكاش.
             separator = "&" if "?" in url else "?"
+
             request_url = (
                 f"{url}"
                 f"{separator}"
@@ -382,18 +378,8 @@ STRONG_CHAPTER_PATTERNS = [
 
 
 # ============================================================
-# TRUTHNOVEL / GENERIC POST URL PATTERNS
+# GENERIC NUMERIC POST URL PATTERNS
 # ============================================================
-
-# مهم جدًا لـ TruthNovel:
-# الرابط نفسه قد يكون بالشكل:
-#
-# /2468-عنوان-الفصل/
-#
-# ولذلك نبحث عن رقم في بداية مسار الصفحة.
-#
-# لا نستخدم أي رقم عشوائي في URL حتى لا نلتقط أرقامًا
-# مثل 2026 أو أرقام WordPress أو IDs غير مرتبطة بالفصل.
 
 URL_START_CHAPTER_PATTERNS = [
 
@@ -415,6 +401,10 @@ WEAK_CHAPTER_PATTERNS = [
 
     r"(?<!\d)(\d{1,7})\s+[ء-يA-Za-z][ء-يA-Za-z\s\-–—:]{2,}",
 
+    # هذا النمط لا نستخدمه كدليل قوي.
+    # لأنه قد يقرأ:
+    # "عنوان الفصل-1"
+    # على أنه الفصل 1.
     r"[^\d\n]{2,}\s*[-–—:]\s*(\d{1,7})(?!\d)",
 ]
 
@@ -426,18 +416,14 @@ WEAK_CHAPTER_PATTERNS = [
 YEAR_MIN = 1900
 YEAR_MAX = 2100
 
-
 EXPLICIT_CHAPTER_CONTEXT_PATTERNS = (
-
     r"\bchapter\b",
     r"\bchap\b",
     r"\bch\b",
     r"\bepisode\b",
     r"\bep\b",
-
     r"الفصل",
     r"فصل",
-
     r"章",
 )
 
@@ -628,12 +614,15 @@ def extract_url_start_chapters(url):
     for pattern in URL_START_CHAPTER_PATTERNS:
 
         try:
+
             matches = re.findall(
                 pattern,
                 path,
                 flags=re.IGNORECASE,
             )
+
         except re.error:
+
             continue
 
         for match in matches:
@@ -649,7 +638,7 @@ def extract_url_start_chapters(url):
             if 1 <= number <= 1000000:
                 results.append(number)
 
-    return results
+    return list(dict.fromkeys(results))
 
 
 # ============================================================
@@ -742,13 +731,14 @@ def collect_json_candidates(
             text,
         )
 
+        # الضعيف يبقى منخفضًا جدًا.
         add_candidates(
             candidates,
             extract_matches(
                 text,
                 WEAK_CHAPTER_PATTERNS,
             ),
-            45,
+            20,
             source,
             text,
         )
@@ -810,7 +800,7 @@ def extract_from_title(
             text,
             STRONG_CHAPTER_PATTERNS,
         ),
-        120,
+        150,
         "HTML title",
         text,
     )
@@ -821,7 +811,7 @@ def extract_from_title(
             text,
             WEAK_CHAPTER_PATTERNS,
         ),
-        55,
+        25,
         "HTML title",
         text,
     )
@@ -857,7 +847,7 @@ def extract_from_headings(
                 text,
                 STRONG_CHAPTER_PATTERNS,
             ),
-            120,
+            150,
             f"HTML {tag.name}",
             text,
         )
@@ -868,7 +858,7 @@ def extract_from_headings(
                 text,
                 WEAK_CHAPTER_PATTERNS,
             ),
-            70,
+            25,
             f"HTML {tag.name}",
             text,
         )
@@ -949,7 +939,7 @@ def extract_from_links(
         )
 
         # ----------------------------------------------------
-        # Strong URL detection
+        # Strong URL
         # ----------------------------------------------------
 
         strong_numbers = extract_matches(
@@ -962,22 +952,17 @@ def extract_from_links(
             add_candidates(
                 candidates,
                 strong_numbers,
-                150,
+                180,
                 "chapter URL",
                 text or href,
                 href,
             )
 
             links_seen += 1
-
             continue
 
         # ----------------------------------------------------
-        # TruthNovel-style URL:
-        #
-        # /2468-title/
-        #
-        # This is the important new detector.
+        # Generic numeric chapter URL
         # ----------------------------------------------------
 
         url_numbers = extract_url_start_chapters(
@@ -988,10 +973,8 @@ def extract_from_links(
 
             for number in url_numbers:
 
-                score = 155
+                score = 180
 
-                # إذا كان الرقم قريبًا من الفصل القديم،
-                # فهذا دليل قوي جدًا.
                 if old is not None:
 
                     difference = (
@@ -999,16 +982,16 @@ def extract_from_links(
                     )
 
                     if difference == 1:
-                        score += 80
+                        score += 100
 
                     elif 1 < difference <= 10:
-                        score += 50
+                        score += 70
 
                     elif 10 < difference <= 100:
-                        score += 20
+                        score += 30
 
                     elif difference < 0:
-                        score -= 20
+                        score -= 10
 
                 candidates.append(
                     Candidate(
@@ -1021,7 +1004,6 @@ def extract_from_links(
                 )
 
             links_seen += 1
-
             continue
 
         # ----------------------------------------------------
@@ -1036,19 +1018,20 @@ def extract_from_links(
                     text,
                     STRONG_CHAPTER_PATTERNS,
                 ),
-                135,
+                150,
                 "chapter link text",
                 text,
                 href,
             )
 
+            # لا نعطي weak link text وزنًا كبيرًا.
             add_candidates(
                 candidates,
                 extract_matches(
                     text,
                     WEAK_CHAPTER_PATTERNS,
                 ),
-                90,
+                20,
                 "chapter link text",
                 text,
                 href,
@@ -1086,7 +1069,7 @@ def extract_from_links(
                     candidates.append(
                         Candidate(
                             number,
-                            145,
+                            180,
                             "chapter query URL",
                             href,
                             href,
@@ -1131,7 +1114,7 @@ def extract_from_meta(
                 text,
                 STRONG_CHAPTER_PATTERNS,
             ),
-            80,
+            90,
             "meta",
             text,
         )
@@ -1171,13 +1154,13 @@ def extract_from_data_attributes(
                 )
             ):
 
-                strong_score = 140
-                weak_score = 75
+                strong_score = 160
+                weak_score = 25
 
             else:
 
                 strong_score = 65
-                weak_score = 30
+                weak_score = 10
 
             add_candidates(
                 candidates,
@@ -1300,7 +1283,7 @@ def extract_from_scripts(
                     raw,
                     STRONG_CHAPTER_PATTERNS,
                 ),
-                110,
+                130,
                 "JavaScript",
                 raw,
             )
@@ -1311,7 +1294,7 @@ def extract_from_scripts(
                     raw,
                     WEAK_CHAPTER_PATTERNS,
                 ),
-                55,
+                15,
                 "JavaScript",
                 raw,
             )
@@ -1400,7 +1383,7 @@ def extract_from_raw_html(
             decoded,
             STRONG_CHAPTER_PATTERNS,
         ),
-        50,
+        60,
         "raw HTML",
         decoded,
     )
@@ -1429,18 +1412,20 @@ def extract_from_page_text(
             text,
             STRONG_CHAPTER_PATTERNS,
         ),
-        55,
+        65,
         "page text",
         text,
     )
 
+    # الضعيف منخفض جدًا حتى لا يحوّل
+    # أرقامًا داخل عناوين فرعية إلى فصول.
     add_candidates(
         candidates,
         extract_matches(
             text,
             WEAK_CHAPTER_PATTERNS,
         ),
-        15,
+        2,
         "page text",
         text,
     )
@@ -1482,7 +1467,6 @@ def discover_pagination_urls(
 
         href_lower = href.lower()
 
-        # WordPress pagination
         if (
             "page/" in href_lower
             or "paged=" in href_lower
@@ -1492,7 +1476,6 @@ def discover_pagination_urls(
 
             urls.add(href)
 
-        # كلمات شائعة لزر السابق/التالي/صفحات الرواية
         if any(
             word in text
             for word in (
@@ -1523,9 +1506,6 @@ def discover_related_pages(
 
     urls.update(pagination)
 
-    # روابط الصفحات التي تحمل عناوين الفصول
-    # مفيدة جدًا للمواقع التي تعرض أحدث الفصول
-    # كرابط منفصل.
     for link in soup.find_all("a"):
 
         href = link.get("href")
@@ -1559,7 +1539,6 @@ def discover_related_pages(
         if numbers:
 
             urls.add(href)
-
             continue
 
         if extract_matches(
@@ -1752,10 +1731,6 @@ def extract_from_sitemap(
             if not content:
                 continue
 
-            # ------------------------------------------------
-            # أولًا: روابط الصفحات نفسها.
-            # ------------------------------------------------
-
             for match in re.findall(
                 r"<loc>\s*(.*?)\s*</loc>",
                 content,
@@ -1775,7 +1750,7 @@ def extract_from_sitemap(
                     add_candidates(
                         candidates,
                         numbers,
-                        145,
+                        170,
                         "sitemap chapter URL",
                         loc,
                         loc,
@@ -1791,7 +1766,7 @@ def extract_from_sitemap(
                     add_candidates(
                         candidates,
                         strong,
-                        120,
+                        140,
                         "sitemap",
                         loc,
                         loc,
@@ -1821,19 +1796,18 @@ def discover_chapters_from_related_pages(
         soup,
     )
 
-    # إزالة التكرار
     related_urls = list(
         dict.fromkeys(
             related_urls
         )
     )
 
-    # لا نزور عددًا ضخمًا من الصفحات.
     related_urls = related_urls[
         :MAX_DISCOVERY_PAGES
     ]
 
     if not related_urls:
+
         print(
             "[DISCOVERY] No related chapter "
             "pages found on main page."
@@ -1861,7 +1835,6 @@ def discover_chapters_from_related_pages(
                 "html.parser",
             )
 
-            # URL نفسه
             numbers = extract_url_start_chapters(
                 final_url
             )
@@ -1869,13 +1842,12 @@ def discover_chapters_from_related_pages(
             add_candidates(
                 candidates,
                 numbers,
-                180,
+                220,
                 "discovered chapter page URL",
                 final_url,
                 final_url,
             )
 
-            # العنوان
             if related_soup.title:
 
                 title = related_soup.title.get_text(
@@ -1889,7 +1861,7 @@ def discover_chapters_from_related_pages(
                         title,
                         WEAK_CHAPTER_PATTERNS,
                     ),
-                    130,
+                    30,
                     "discovered chapter title",
                     title,
                     final_url,
@@ -1901,13 +1873,12 @@ def discover_chapters_from_related_pages(
                         title,
                         STRONG_CHAPTER_PATTERNS,
                     ),
-                    150,
+                    180,
                     "discovered chapter title",
                     title,
                     final_url,
                 )
 
-            # H1
             for h1 in related_soup.find_all(
                 "h1"
             )[:3]:
@@ -1923,7 +1894,19 @@ def discover_chapters_from_related_pages(
                         text,
                         WEAK_CHAPTER_PATTERNS,
                     ),
-                    120,
+                    30,
+                    "discovered H1",
+                    text,
+                    final_url,
+                )
+
+                add_candidates(
+                    candidates,
+                    extract_matches(
+                        text,
+                        STRONG_CHAPTER_PATTERNS,
+                    ),
+                    180,
                     "discovered H1",
                     text,
                     final_url,
@@ -1978,10 +1961,203 @@ def candidate_is_reasonable(
     if old is not None:
 
         if number > old + 100000:
-
             return False
 
     return True
+
+
+# ============================================================
+# EVIDENCE SCORING
+# ============================================================
+
+def evidence_key(item):
+    context = re.sub(
+        r"\s+",
+        " ",
+        item.context.strip().lower(),
+    )
+
+    url = item.url.strip().lower()
+
+    return (
+        item.source,
+        context[:250],
+        url[:400],
+    )
+
+
+def score_number_group(
+    number,
+    items,
+    old,
+):
+
+    # --------------------------------------------------------
+    # لا نجمع كل التكرارات كما كان يحدث سابقًا.
+    #
+    # نفس العنوان قد يظهر 20 أو 30 مرة في الصفحة.
+    # لا يجب أن يجعل هذا الرقم أقوى 30 مرة.
+    # --------------------------------------------------------
+
+    unique_evidence = {}
+
+    for item in items:
+
+        key = evidence_key(item)
+
+        existing = unique_evidence.get(
+            key
+        )
+
+        if existing is None:
+            unique_evidence[key] = item
+
+        elif item.score > existing.score:
+            unique_evidence[key] = item
+
+    unique_items = list(
+        unique_evidence.values()
+    )
+
+    # --------------------------------------------------------
+    # لكل مصدر نأخذ أقوى دليل بدل جمع التكرارات.
+    # --------------------------------------------------------
+
+    source_best = {}
+
+    for item in unique_items:
+
+        source = item.source
+
+        existing = source_best.get(
+            source
+        )
+
+        if existing is None:
+            source_best[source] = item
+
+        elif item.score > existing.score:
+            source_best[source] = item
+
+    total_score = sum(
+        item.score
+        for item in source_best.values()
+    )
+
+    # --------------------------------------------------------
+    # تنوع المصادر
+    # --------------------------------------------------------
+
+    source_count = len(
+        source_best
+    )
+
+    if source_count >= 2:
+        total_score += 50
+
+    if source_count >= 3:
+        total_score += 70
+
+    if source_count >= 4:
+        total_score += 90
+
+    # --------------------------------------------------------
+    # العلاقة مع آخر فصل
+    # --------------------------------------------------------
+
+    if old is not None:
+
+        difference = number - old
+
+        # نفس الفصل الحالي
+        if difference == 0:
+            total_score += 250
+
+        # الفصل التالي
+        elif difference == 1:
+            total_score += 500
+
+        # عدة فصول جديدة
+        elif 1 < difference <= 10:
+            total_score += 300
+
+        elif 10 < difference <= 100:
+            total_score += 120
+
+        # فصل قديم
+        elif difference < 0:
+
+            distance = abs(difference)
+
+            if distance <= 2:
+                total_score -= 40
+
+            elif distance <= 10:
+                total_score -= 120
+
+            elif distance <= 100:
+                total_score -= 500
+
+            else:
+                total_score -= 1200
+
+        # قفزة ضخمة
+        elif difference > 100:
+
+            explicit_evidence = any(
+                (
+                    has_explicit_chapter_context(
+                        evidence.context
+                    )
+                    or "chapter URL"
+                    in evidence.source
+                    or "site chapter URL"
+                    in evidence.source
+                    or "discovered chapter page URL"
+                    in evidence.source
+                    or "sitemap chapter URL"
+                    in evidence.source
+                )
+                for evidence in unique_items
+            )
+
+            if explicit_evidence:
+                total_score += 20
+            else:
+                total_score -= 1000
+
+        # ----------------------------------------------------
+        # حماية إضافية:
+        #
+        # إذا كان الفصل الحالي في الآلاف، فلا ينبغي
+        # أن يهزم رقم صغير جدًا مثل 1 بسبب عنوان فرعي.
+        # ----------------------------------------------------
+
+        if (
+            old >= 20
+            and number <= 10
+            and difference < -10
+        ):
+
+            weak_only = all(
+                evidence.score <= 70
+                for evidence in unique_items
+            )
+
+            if weak_only:
+
+                total_score -= 5000
+
+    # --------------------------------------------------------
+    # عدد الأدلة الفريدة له قيمة، لكن بحد أقصى.
+    # --------------------------------------------------------
+
+    total_score += min(
+        len(unique_items) * 8,
+        80,
+    )
+
+    return total_score
 
 
 # ============================================================
@@ -2021,79 +2197,11 @@ def rank_candidates(
 
     for number, items in grouped.items():
 
-        total_score = sum(
-            item.score
-            for item in items
+        total_score = score_number_group(
+            number,
+            items,
+            old,
         )
-
-        sources = set(
-            item.source
-            for item in items
-        )
-
-        # ----------------------------------------------------
-        # استقلال المصادر
-        # ----------------------------------------------------
-
-        if len(sources) >= 2:
-            total_score += 35
-
-        if len(sources) >= 3:
-            total_score += 40
-
-        if len(sources) >= 4:
-            total_score += 45
-
-        # ----------------------------------------------------
-        # تكرار الرقم
-        # ----------------------------------------------------
-
-        total_score += min(
-            len(items) * 5,
-            40,
-        )
-
-        # ----------------------------------------------------
-        # العلاقة مع آخر فصل
-        # ----------------------------------------------------
-
-        if old is not None:
-
-            difference = (
-                number - old
-            )
-
-            if difference == 1:
-                total_score += 180
-
-            elif 1 < difference <= 20:
-                total_score += 65
-
-            elif 20 < difference <= 100:
-                total_score += 20
-
-            elif difference < 0:
-                total_score -= 15
-
-            elif difference > 100:
-
-                explicit_evidence = any(
-                    has_explicit_chapter_context(
-                        evidence.context
-                    )
-                    or "chapter URL" in evidence.source
-                    or "site chapter URL" in evidence.source
-                    or "discovered chapter page URL"
-                    in evidence.source
-                    or "sitemap chapter URL"
-                    in evidence.source
-                    for evidence in items
-                )
-
-                if explicit_evidence:
-                    total_score += 5
-                else:
-                    total_score -= 80
 
         ranked.append(
             {
@@ -2131,10 +2239,7 @@ def extract_latest_chapter(
 
     candidates = []
 
-    # --------------------------------------------------------
     # HTML
-    # --------------------------------------------------------
-
     extract_from_title(
         soup,
         candidates,
@@ -2162,10 +2267,7 @@ def extract_latest_chapter(
         candidates,
     )
 
-    # --------------------------------------------------------
     # Structured data
-    # --------------------------------------------------------
-
     extract_from_json_ld(
         soup,
         candidates,
@@ -2176,19 +2278,13 @@ def extract_latest_chapter(
         candidates,
     )
 
-    # --------------------------------------------------------
     # JavaScript
-    # --------------------------------------------------------
-
     extract_from_scripts(
         soup,
         candidates,
     )
 
-    # --------------------------------------------------------
     # Raw HTML + visible text
-    # --------------------------------------------------------
-
     extract_from_raw_html(
         html,
         candidates,
@@ -2199,10 +2295,7 @@ def extract_latest_chapter(
         candidates,
     )
 
-    # --------------------------------------------------------
     # Related chapter pages
-    # --------------------------------------------------------
-
     discover_chapters_from_related_pages(
         page_url,
         soup,
@@ -2210,29 +2303,20 @@ def extract_latest_chapter(
         candidates,
     )
 
-    # --------------------------------------------------------
     # API
-    # --------------------------------------------------------
-
     extract_from_api(
         page_url,
         soup,
         candidates,
     )
 
-    # --------------------------------------------------------
     # Sitemap
-    # --------------------------------------------------------
-
     extract_from_sitemap(
         page_url,
         candidates,
     )
 
-    # --------------------------------------------------------
     # Ranking
-    # --------------------------------------------------------
-
     ranked = rank_candidates(
         candidates,
         old_chapter,
@@ -2282,9 +2366,27 @@ def print_detection_details(
         "[DETECTION] Evidence:"
     )
 
-    for evidence in best[
-        "evidence"
-    ][:8]:
+    # عرض أفضل الأدلة فقط
+    evidence_sorted = sorted(
+        best["evidence"],
+        key=lambda item: item.score,
+        reverse=True,
+    )
+
+    shown = set()
+
+    count = 0
+
+    for evidence in evidence_sorted:
+
+        key = evidence_key(
+            evidence
+        )
+
+        if key in shown:
+            continue
+
+        shown.add(key)
 
         context = (
             evidence.context
@@ -2308,6 +2410,11 @@ def print_detection_details(
             print(
                 f"    {context[:180]}"
             )
+
+        count += 1
+
+        if count >= 8:
+            break
 
     if len(ranked) > 1:
 
@@ -2573,7 +2680,6 @@ def monitor_work(
 
         print(error)
 
-        # لا نحدث last_chapter.
         return False
 
     # --------------------------------------------------------
