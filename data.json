@@ -10,12 +10,13 @@
         }
       ],
       "state": {
-        "step": "waiting_name",
-        "type": "رواية"
+        "step": "waiting_url",
+        "type": "رواية",
+        "name": "Lord Of The Truth"
       },
       "first_seen": 1790025835463,
-      "last_active": 1790733692831,
-      "last_bot_message_id": 245
+      "last_active": 1790733719601,
+      "last_bot_message_id": 247
     },
     "2057656653": {
       "works": [],
