@@ -5,7 +5,7 @@ import base64
 import time
 import html as html_module
 from collections import defaultdict
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, parse_qs
 
 import requests
 from bs4 import BeautifulSoup
@@ -28,8 +28,18 @@ REQUEST_TIMEOUT = 30
 API_TIMEOUT = 15
 MAX_RETRIES = 3
 
+# عدد صفحات القائمة التي نحاول الوصول إليها
+# عند الحاجة للبحث عن الفصول الجديدة.
+MAX_DISCOVERY_PAGES = 8
+
+# عدد روابط الفصول التي نفحصها كحد أقصى.
+MAX_CHAPTER_LINKS = 80
+
 COMMON_API_PATHS = (
     "/wp-json/",
+    "/wp-json/wp/v2/posts",
+    "/wp-json/wp/v2/pages",
+    "/wp-json/wp/v2/search",
     "/api/",
     "/api/chapters",
     "/api/chapter",
@@ -49,9 +59,11 @@ HTTP_HEADERS = {
         "application/json;q=0.9,"
         "*/*;q=0.8"
     ),
-    "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
-    "Cache-Control": "no-cache",
+    "Accept-Language": "ar,en;q=0.9",
+    "Cache-Control": "no-cache, no-store, max-age=0",
     "Pragma": "no-cache",
+    "DNT": "1",
+    "Connection": "keep-alive",
 }
 
 
@@ -80,6 +92,7 @@ def load_data():
         GITHUB_API,
         headers=github_headers(),
         timeout=REQUEST_TIMEOUT,
+        params={"_": str(int(time.time()))},
     )
 
     response.raise_for_status()
@@ -162,13 +175,26 @@ def request_with_retry(
 ):
     last_error = None
 
+    request_headers = dict(HTTP_HEADERS)
+
+    if headers:
+        request_headers.update(headers)
+
     for attempt in range(1, MAX_RETRIES + 1):
 
         try:
 
+            # إضافة قيمة متغيرة تمنع بعض أنواع الكاش.
+            separator = "&" if "?" in url else "?"
+            request_url = (
+                f"{url}"
+                f"{separator}"
+                f"_monitor={int(time.time())}"
+            )
+
             response = SESSION.get(
-                url,
-                headers=headers,
+                request_url,
+                headers=request_headers,
                 timeout=timeout,
                 allow_redirects=allow_redirects,
             )
@@ -315,8 +341,6 @@ def display_chapter(chapter):
 # CHAPTER PATTERNS
 # ============================================================
 
-# أنماط قوية:
-# الرقم مرتبط مباشرة بكلمة تدل على الفصل.
 STRONG_CHAPTER_PATTERNS = [
 
     # English
@@ -324,18 +348,18 @@ STRONG_CHAPTER_PATTERNS = [
     r"\bchap(?:ter)?\s*[:#._\-–—]?\s*(\d+(?:\.\d+)?)",
     r"\bch\s*[:#._\-–—]?\s*(\d+(?:\.\d+)?)",
 
-    # English episode
+    # Episode
     r"\bepisode\s*(?:no\.?|number)?\s*[:#._\-–—]?\s*(\d+(?:\.\d+)?)",
     r"\bep\s*[:#._\-–—]?\s*(\d+(?:\.\d+)?)",
 
     # Arabic
-    r"\bالفصل\s*(?:رقم)?\s*[:#._\-–—]?\s*(\d+(?:\.\d+)?)",
+    r"الفصل\s*(?:رقم)?\s*[:#._\-–—]?\s*(\d+(?:\.\d+)?)",
     r"فصل\s*[:#._\-–—]?\s*(\d+(?:\.\d+)?)",
 
     # Chinese
     r"第\s*(\d+(?:\.\d+)?)\s*章",
 
-    # URL
+    # URL patterns
     r"/chapter/(\d+(?:\.\d+)?)",
     r"/chapter-(\d+(?:\.\d+)?)",
     r"/chapter_(\d+(?:\.\d+)?)",
@@ -351,9 +375,33 @@ STRONG_CHAPTER_PATTERNS = [
     # Query parameters
     r"[?&](?:chapter|chap|ch|episode|ep)[=_-](\d+(?:\.\d+)?)",
 
-    # Chapter number / ID
+    # Explicit chapter IDs
     r"\bchapter[-_ ]number\s*[:=]\s*(\d+(?:\.\d+)?)",
     r"\bchapter[-_ ]id\s*[:=]\s*(\d+(?:\.\d+)?)",
+]
+
+
+# ============================================================
+# TRUTHNOVEL / GENERIC POST URL PATTERNS
+# ============================================================
+
+# مهم جدًا لـ TruthNovel:
+# الرابط نفسه قد يكون بالشكل:
+#
+# /2468-عنوان-الفصل/
+#
+# ولذلك نبحث عن رقم في بداية مسار الصفحة.
+#
+# لا نستخدم أي رقم عشوائي في URL حتى لا نلتقط أرقامًا
+# مثل 2026 أو أرقام WordPress أو IDs غير مرتبطة بالفصل.
+
+URL_START_CHAPTER_PATTERNS = [
+
+    r"/(\d{1,7})(?:[-–—_][^/]+)?/?$",
+
+    r"/(\d{1,7})(?:[-–—_])",
+
+    r"/(\d{1,7})/",
 ]
 
 
@@ -361,8 +409,6 @@ STRONG_CHAPTER_PATTERNS = [
 # WEAK CHAPTER PATTERNS
 # ============================================================
 
-# هذه الأنماط مفيدة لبعض مواقع الروايات،
-# لكنها لا تعني أن الرقم فصل بشكل مؤكد.
 WEAK_CHAPTER_PATTERNS = [
 
     r"(?<!\d)(\d{1,7})\s*[-–—:]\s*[^\d\n]{2,}",
@@ -377,27 +423,21 @@ WEAK_CHAPTER_PATTERNS = [
 # SUSPICIOUS NUMBERS
 # ============================================================
 
-# السنوات الشائعة.
-# لن نرفضها دائمًا، لأن Chapter 2025 ممكن نظريًا.
-# لكن إذا ظهرت بدون سياق فصل واضح، سيتم رفضها.
 YEAR_MIN = 1900
 YEAR_MAX = 2100
 
 
 EXPLICIT_CHAPTER_CONTEXT_PATTERNS = (
 
-    # English
     r"\bchapter\b",
     r"\bchap\b",
     r"\bch\b",
     r"\bepisode\b",
     r"\bep\b",
 
-    # Arabic
-    r"\bالفصل\b",
-    r"\bفصل\b",
+    r"الفصل",
+    r"فصل",
 
-    # Chinese
     r"章",
 )
 
@@ -434,8 +474,6 @@ def is_suspicious_year(
 
     if YEAR_MIN <= number <= YEAR_MAX:
 
-        # إذا كان السياق يحتوي على Chapter / Episode
-        # فقد يكون رقم الفصل حقيقيًا.
         if has_explicit_chapter_context(context):
             return False
 
@@ -478,6 +516,7 @@ class Candidate:
         score,
         source,
         context="",
+        url="",
     ):
         self.number = number
         self.score = score
@@ -485,6 +524,9 @@ class Candidate:
         self.context = str(
             context or ""
         )[:500]
+        self.url = str(
+            url or ""
+        )[:1000]
 
     def __repr__(self):
         return (
@@ -502,6 +544,7 @@ def add_candidates(
     score,
     source,
     context="",
+    url="",
 ):
 
     for number in numbers:
@@ -512,6 +555,7 @@ def add_candidates(
                 score=score,
                 source=source,
                 context=context,
+                url=url,
             )
         )
 
@@ -569,6 +613,45 @@ def extract_matches(
     return results
 
 
+def extract_url_start_chapters(url):
+    if not url:
+        return []
+
+    parsed = urlparse(url)
+
+    path = parsed.path or ""
+
+    path = normalize_digits(path)
+
+    results = []
+
+    for pattern in URL_START_CHAPTER_PATTERNS:
+
+        try:
+            matches = re.findall(
+                pattern,
+                path,
+                flags=re.IGNORECASE,
+            )
+        except re.error:
+            continue
+
+        for match in matches:
+
+            if isinstance(match, tuple):
+                match = match[0]
+
+            number = normalize_number(match)
+
+            if number is None:
+                continue
+
+            if 1 <= number <= 1000000:
+                results.append(number)
+
+    return results
+
+
 # ============================================================
 # JSON HELPERS
 # ============================================================
@@ -581,11 +664,9 @@ def safe_json_loads(raw):
     raw = raw.strip()
 
     try:
-
         return json.loads(raw)
 
     except Exception:
-
         return None
 
 
@@ -608,8 +689,6 @@ def collect_json_candidates(
                 .replace(" ", "_")
             )
 
-            # حقل واضح جدًا مثل:
-            # chapter_number: 2455
             if key_lower in CHAPTER_FIELD_NAMES:
 
                 number = normalize_number(
@@ -684,9 +763,7 @@ def extract_from_json_text(
     if not raw:
         return
 
-    data = safe_json_loads(
-        raw
-    )
+    data = safe_json_loads(raw)
 
     if data is not None:
 
@@ -797,26 +874,159 @@ def extract_from_headings(
         )
 
 
+def is_same_domain(
+    base_url,
+    target_url,
+):
+
+    try:
+
+        base_host = (
+            urlparse(base_url)
+            .netloc
+            .lower()
+            .split(":")[0]
+        )
+
+        target_host = (
+            urlparse(target_url)
+            .netloc
+            .lower()
+            .split(":")[0]
+        )
+
+        return (
+            base_host == target_host
+            or target_host.endswith(
+                "." + base_host
+            )
+            or base_host.endswith(
+                "." + target_host
+            )
+        )
+
+    except Exception:
+        return False
+
+
 def extract_from_links(
     soup,
     page_url,
     candidates,
+    old_chapter=None,
 ):
 
+    old = normalize_number(
+        old_chapter
+    )
+
+    links_seen = 0
+
     for link in soup.find_all("a"):
+
+        if links_seen >= MAX_CHAPTER_LINKS:
+            break
+
+        href = link.get("href")
+
+        if not href:
+            continue
+
+        href = urljoin(
+            page_url,
+            href,
+        )
+
+        if not is_same_domain(
+            page_url,
+            href,
+        ):
+            continue
 
         text = link.get_text(
             " ",
             strip=True,
         )
 
-        href = link.get("href")
+        # ----------------------------------------------------
+        # Strong URL detection
+        # ----------------------------------------------------
 
-        if href:
-            href = urljoin(
-                page_url,
+        strong_numbers = extract_matches(
+            href,
+            STRONG_CHAPTER_PATTERNS,
+        )
+
+        if strong_numbers:
+
+            add_candidates(
+                candidates,
+                strong_numbers,
+                150,
+                "chapter URL",
+                text or href,
                 href,
             )
+
+            links_seen += 1
+
+            continue
+
+        # ----------------------------------------------------
+        # TruthNovel-style URL:
+        #
+        # /2468-title/
+        #
+        # This is the important new detector.
+        # ----------------------------------------------------
+
+        url_numbers = extract_url_start_chapters(
+            href
+        )
+
+        if url_numbers:
+
+            for number in url_numbers:
+
+                score = 155
+
+                # إذا كان الرقم قريبًا من الفصل القديم،
+                # فهذا دليل قوي جدًا.
+                if old is not None:
+
+                    difference = (
+                        number - old
+                    )
+
+                    if difference == 1:
+                        score += 80
+
+                    elif 1 < difference <= 10:
+                        score += 50
+
+                    elif 10 < difference <= 100:
+                        score += 20
+
+                    elif difference < 0:
+                        score -= 20
+
+                candidates.append(
+                    Candidate(
+                        number,
+                        score,
+                        "site chapter URL",
+                        text or href,
+                        href,
+                    )
+                )
+
+            links_seen += 1
+
+            continue
+
+        # ----------------------------------------------------
+        # Link text
+        # ----------------------------------------------------
 
         if text:
 
@@ -826,9 +1036,10 @@ def extract_from_links(
                     text,
                     STRONG_CHAPTER_PATTERNS,
                 ),
-                125,
+                135,
                 "chapter link text",
                 text,
+                href,
             )
 
             add_candidates(
@@ -840,20 +1051,49 @@ def extract_from_links(
                 90,
                 "chapter link text",
                 text,
-            )
-
-        if href:
-
-            add_candidates(
-                candidates,
-                extract_matches(
-                    href,
-                    STRONG_CHAPTER_PATTERNS,
-                ),
-                140,
-                "chapter URL",
                 href,
             )
+
+        # ----------------------------------------------------
+        # Query parameter
+        # ----------------------------------------------------
+
+        parsed = urlparse(href)
+
+        query = parse_qs(
+            parsed.query
+        )
+
+        for key in (
+            "chapter",
+            "chap",
+            "ch",
+            "episode",
+            "ep",
+        ):
+
+            if key not in query:
+                continue
+
+            for value in query[key]:
+
+                number = normalize_number(
+                    value
+                )
+
+                if number is not None:
+
+                    candidates.append(
+                        Candidate(
+                            number,
+                            145,
+                            "chapter query URL",
+                            href,
+                            href,
+                        )
+                    )
+
+        links_seen += 1
 
 
 def extract_from_meta(
@@ -1207,6 +1447,132 @@ def extract_from_page_text(
 
 
 # ============================================================
+# PAGINATION DISCOVERY
+# ============================================================
+
+def discover_pagination_urls(
+    page_url,
+    soup,
+):
+
+    urls = set()
+
+    for link in soup.find_all("a"):
+
+        href = link.get("href")
+
+        if not href:
+            continue
+
+        href = urljoin(
+            page_url,
+            href,
+        )
+
+        if not is_same_domain(
+            page_url,
+            href,
+        ):
+            continue
+
+        text = link.get_text(
+            " ",
+            strip=True,
+        ).lower()
+
+        href_lower = href.lower()
+
+        # WordPress pagination
+        if (
+            "page/" in href_lower
+            or "paged=" in href_lower
+            or "/page-" in href_lower
+            or "page=" in href_lower
+        ):
+
+            urls.add(href)
+
+        # كلمات شائعة لزر السابق/التالي/صفحات الرواية
+        if any(
+            word in text
+            for word in (
+                "التالي",
+                "السابق",
+                "next",
+                "older",
+                "newer",
+            )
+        ):
+
+            urls.add(href)
+
+    return urls
+
+
+def discover_related_pages(
+    page_url,
+    soup,
+):
+
+    urls = set()
+
+    pagination = discover_pagination_urls(
+        page_url,
+        soup,
+    )
+
+    urls.update(pagination)
+
+    # روابط الصفحات التي تحمل عناوين الفصول
+    # مفيدة جدًا للمواقع التي تعرض أحدث الفصول
+    # كرابط منفصل.
+    for link in soup.find_all("a"):
+
+        href = link.get("href")
+
+        if not href:
+            continue
+
+        href = urljoin(
+            page_url,
+            href,
+        )
+
+        if not is_same_domain(
+            page_url,
+            href,
+        ):
+            continue
+
+        text = link.get_text(
+            " ",
+            strip=True,
+        )
+
+        if not text:
+            continue
+
+        numbers = extract_url_start_chapters(
+            href
+        )
+
+        if numbers:
+
+            urls.add(href)
+
+            continue
+
+        if extract_matches(
+            text,
+            STRONG_CHAPTER_PATTERNS,
+        ):
+
+            urls.add(href)
+
+    return list(urls)
+
+
+# ============================================================
 # URL / API DISCOVERY
 # ============================================================
 
@@ -1292,7 +1658,7 @@ def extract_from_api(
         soup,
     )
 
-    api_urls = list(api_urls)[:15]
+    api_urls = list(api_urls)[:20]
 
     for api_url in api_urls:
 
@@ -1353,7 +1719,7 @@ def discover_sitemap_urls(
         page_url
     )
 
-    urls = {
+    return {
         urljoin(
             base_url,
             "/sitemap.xml",
@@ -1362,13 +1728,7 @@ def discover_sitemap_urls(
             base_url,
             "/sitemap_index.xml",
         ),
-        urljoin(
-            base_url,
-            "/sitemap_index.xml.gz",
-        ),
     }
-
-    return urls
 
 
 def extract_from_sitemap(
@@ -1392,22 +1752,188 @@ def extract_from_sitemap(
             if not content:
                 continue
 
-            add_candidates(
-                candidates,
-                extract_matches(
-                    content,
-                    STRONG_CHAPTER_PATTERNS,
-                ),
-                90,
-                "sitemap",
+            # ------------------------------------------------
+            # أولًا: روابط الصفحات نفسها.
+            # ------------------------------------------------
+
+            for match in re.findall(
+                r"<loc>\s*(.*?)\s*</loc>",
                 content,
-            )
+                flags=re.IGNORECASE,
+            ):
+
+                loc = html_module.unescape(
+                    match.strip()
+                )
+
+                numbers = extract_url_start_chapters(
+                    loc
+                )
+
+                if numbers:
+
+                    add_candidates(
+                        candidates,
+                        numbers,
+                        145,
+                        "sitemap chapter URL",
+                        loc,
+                        loc,
+                    )
+
+                strong = extract_matches(
+                    loc,
+                    STRONG_CHAPTER_PATTERNS,
+                )
+
+                if strong:
+
+                    add_candidates(
+                        candidates,
+                        strong,
+                        120,
+                        "sitemap",
+                        loc,
+                        loc,
+                    )
 
         except Exception as error:
 
             print(
                 f"[SITEMAP] Skipped "
                 f"{sitemap_url}: {error}"
+            )
+
+
+# ============================================================
+# CHAPTER DISCOVERY FROM RELATED PAGES
+# ============================================================
+
+def discover_chapters_from_related_pages(
+    page_url,
+    soup,
+    old_chapter,
+    candidates,
+):
+
+    related_urls = discover_related_pages(
+        page_url,
+        soup,
+    )
+
+    # إزالة التكرار
+    related_urls = list(
+        dict.fromkeys(
+            related_urls
+        )
+    )
+
+    # لا نزور عددًا ضخمًا من الصفحات.
+    related_urls = related_urls[
+        :MAX_DISCOVERY_PAGES
+    ]
+
+    if not related_urls:
+        print(
+            "[DISCOVERY] No related chapter "
+            "pages found on main page."
+        )
+
+        return
+
+    print(
+        f"[DISCOVERY] Checking "
+        f"{len(related_urls)} related pages..."
+    )
+
+    for related_url in related_urls:
+
+        try:
+
+            related_html, final_url, _ = (
+                download_page(
+                    related_url
+                )
+            )
+
+            related_soup = BeautifulSoup(
+                related_html,
+                "html.parser",
+            )
+
+            # URL نفسه
+            numbers = extract_url_start_chapters(
+                final_url
+            )
+
+            add_candidates(
+                candidates,
+                numbers,
+                180,
+                "discovered chapter page URL",
+                final_url,
+                final_url,
+            )
+
+            # العنوان
+            if related_soup.title:
+
+                title = related_soup.title.get_text(
+                    " ",
+                    strip=True,
+                )
+
+                add_candidates(
+                    candidates,
+                    extract_matches(
+                        title,
+                        WEAK_CHAPTER_PATTERNS,
+                    ),
+                    130,
+                    "discovered chapter title",
+                    title,
+                    final_url,
+                )
+
+                add_candidates(
+                    candidates,
+                    extract_matches(
+                        title,
+                        STRONG_CHAPTER_PATTERNS,
+                    ),
+                    150,
+                    "discovered chapter title",
+                    title,
+                    final_url,
+                )
+
+            # H1
+            for h1 in related_soup.find_all(
+                "h1"
+            )[:3]:
+
+                text = h1.get_text(
+                    " ",
+                    strip=True,
+                )
+
+                add_candidates(
+                    candidates,
+                    extract_matches(
+                        text,
+                        WEAK_CHAPTER_PATTERNS,
+                    ),
+                    120,
+                    "discovered H1",
+                    text,
+                    final_url,
+                )
+
+        except Exception as error:
+
+            print(
+                "[DISCOVERY] Skipped "
+                f"{related_url}: {error}"
             )
 
 
@@ -1437,10 +1963,6 @@ def candidate_is_reasonable(
         old_chapter
     )
 
-    # --------------------------------------------------------
-    # حماية من السنوات والتواريخ
-    # --------------------------------------------------------
-
     if is_suspicious_year(
         number,
         candidate.context,
@@ -1451,26 +1973,7 @@ def candidate_is_reasonable(
             f"year-like number: {number}"
         )
 
-        print(
-            f"          Source: {candidate.source}"
-        )
-
-        context = (
-            candidate.context
-            .replace("\n", " ")
-            .strip()
-        )
-
-        if context:
-            print(
-                f"          Context: {context[:180]}"
-            )
-
         return False
-
-    # --------------------------------------------------------
-    # حماية من القفزات غير المنطقية
-    # --------------------------------------------------------
 
     if old is not None:
 
@@ -1529,7 +2032,7 @@ def rank_candidates(
         )
 
         # ----------------------------------------------------
-        # تأكيد من مصادر مستقلة
+        # استقلال المصادر
         # ----------------------------------------------------
 
         if len(sources) >= 2:
@@ -1551,7 +2054,7 @@ def rank_candidates(
         )
 
         # ----------------------------------------------------
-        # العلاقة مع آخر فصل مسجل
+        # العلاقة مع آخر فصل
         # ----------------------------------------------------
 
         if old is not None:
@@ -1560,47 +2063,36 @@ def rank_candidates(
                 number - old
             )
 
-            # الفصل التالي مباشرة.
             if difference == 1:
-
                 total_score += 180
 
-            # عدد صغير من الفصول الجديدة.
             elif 1 < difference <= 20:
-
                 total_score += 65
 
-            # عدد متوسط من الفصول الجديدة.
             elif 20 < difference <= 100:
-
                 total_score += 20
 
-            # رقم أقل من الفصل القديم.
             elif difference < 0:
-
                 total_score -= 15
 
-            # ------------------------------------------------
-            # الأرقام البعيدة جدًا تحتاج دليلًا أقوى.
-            # لا نحذفها مباشرة، لأن بعض المواقع قد تقفز
-            # بعدد كبير من الفصول.
-            # ------------------------------------------------
             elif difference > 100:
 
                 explicit_evidence = any(
                     has_explicit_chapter_context(
                         evidence.context
                     )
-                    for evidence in
-                    items
+                    or "chapter URL" in evidence.source
+                    or "site chapter URL" in evidence.source
+                    or "discovered chapter page URL"
+                    in evidence.source
+                    or "sitemap chapter URL"
+                    in evidence.source
+                    for evidence in items
                 )
 
                 if explicit_evidence:
-
                     total_score += 5
-
                 else:
-
                     total_score -= 80
 
         ranked.append(
@@ -1657,6 +2149,7 @@ def extract_latest_chapter(
         soup,
         page_url,
         candidates,
+        old_chapter,
     )
 
     extract_from_meta(
@@ -1703,6 +2196,17 @@ def extract_latest_chapter(
 
     extract_from_page_text(
         soup,
+        candidates,
+    )
+
+    # --------------------------------------------------------
+    # Related chapter pages
+    # --------------------------------------------------------
+
+    discover_chapters_from_related_pages(
+        page_url,
+        soup,
+        old_chapter,
         candidates,
     )
 
@@ -1780,7 +2284,7 @@ def print_detection_details(
 
     for evidence in best[
         "evidence"
-    ][:6]:
+    ][:8]:
 
         context = (
             evidence.context
@@ -1792,6 +2296,12 @@ def print_detection_details(
             f"  - {evidence.source} "
             f"| +{evidence.score}"
         )
+
+        if evidence.url:
+
+            print(
+                f"    URL: {evidence.url[:220]}"
+            )
 
         if context:
 
@@ -1807,7 +2317,7 @@ def print_detection_details(
         )
 
         for item in ranked[
-            1:6
+            1:8
         ]:
 
             print(
@@ -1860,8 +2370,13 @@ def monitor_work(
         f"        {url}"
     )
 
+    print(
+        f"[OLD] Last recorded chapter: "
+        f"{display_chapter(old_chapter)}"
+    )
+
     # --------------------------------------------------------
-    # Download
+    # Download main page
     # --------------------------------------------------------
 
     try:
@@ -1993,7 +2508,7 @@ def monitor_work(
         return False
 
     # --------------------------------------------------------
-    # New chapter
+    # New chapters
     # --------------------------------------------------------
 
     difference = (
@@ -2003,7 +2518,7 @@ def monitor_work(
 
     print(
         "[NEW] "
-        "New chapter detected!"
+        f"Detected {difference} new chapter(s)."
     )
 
     # --------------------------------------------------------
@@ -2030,7 +2545,11 @@ def monitor_work(
             f"📌 آخر فصل مسجل: "
             f"{display_chapter(old_number)}\n"
             f"📈 عدد الفصول الجديدة: "
-            f"{display_chapter(difference)}\n\n"
+            f"{display_chapter(difference)}\n"
+            f"🆕 الفصول المكتشفة: "
+            f"{display_chapter(old_number + 1)}"
+            f" → "
+            f"{display_chapter(latest_chapter)}\n\n"
             f"🔗 {url}"
         )
 
@@ -2067,7 +2586,8 @@ def monitor_work(
 
     print(
         "[SAVED] "
-        "Chapter updated."
+        "Chapter updated to "
+        f"{display_chapter(latest_chapter)}."
     )
 
     return True
@@ -2172,6 +2692,16 @@ def main():
 
     print(
         "=================================================="
+    )
+
+    print(
+        "[INFO] Monitor interval is controlled "
+        "by GitHub Actions."
+    )
+
+    print(
+        "[INFO] Main page + chapter URLs + "
+        "related pages + API + sitemap."
     )
 
     # --------------------------------------------------------
