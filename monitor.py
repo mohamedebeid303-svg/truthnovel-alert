@@ -2436,26 +2436,11 @@ def build_notification(
         or "عمل جديد"
     )
 
-    if new_chapter > old_chapter + 1:
-        chapter_text = (
-            f"الفصول الجديدة: "
-            f"{old_chapter + 1} "
-            f"إلى {new_chapter}"
-        )
-
-    else:
-        chapter_text = (
-            f"الفصل الجديد: "
-            f"{new_chapter}"
-        )
-
     return (
-        f"📚 {name}\n\n"
-        f"🔔 تم اكتشاف "
-        f"{chapter_text}\n"
-        f"📖 آخر فصل محفوظ: "
-        f"{old_chapter}\n"
-        f"🌐 {page_url}"
+        f"🔔 فصل جديد!\n\n"
+        f"📖 {name}\n"
+        f"📚 الفصل {new_chapter}\n\n"
+        f"🔗 {page_url}"
     )
 
 
