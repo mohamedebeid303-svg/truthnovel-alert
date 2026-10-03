@@ -5,7 +5,11 @@ import base64
 import time
 import html as html_module
 from collections import defaultdict
-from urllib.parse import urljoin, urlparse, parse_qs
+from urllib.parse import (
+    urljoin,
+    urlparse,
+    parse_qs,
+)
 
 import requests
 from bs4 import BeautifulSoup
@@ -21,8 +25,14 @@ DATA_FILE = "data.json"
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 
-TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
-GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{DATA_FILE}"
+TELEGRAM_API = (
+    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+)
+
+GITHUB_API = (
+    f"https://api.github.com/repos/"
+    f"{GITHUB_REPO}/contents/{DATA_FILE}"
+)
 
 REQUEST_TIMEOUT = 30
 API_TIMEOUT = 15
@@ -30,6 +40,33 @@ MAX_RETRIES = 3
 
 MAX_DISCOVERY_PAGES = 8
 MAX_CHAPTER_LINKS = 80
+
+
+# ============================================================
+# DIRECT EXPECTED CHAPTER PROBE
+# ============================================================
+
+# إذا كان آخر فصل = 2476
+# سيتم البحث مباشرة عن:
+# 2477
+# 2478
+# 2479
+# 2480
+# 2481
+
+EXPECTED_PROBE_AHEAD = 5
+
+# إذا لم نجد فصولًا مستقبلية، نتوقف بعد عدد قليل
+# من المحاولات الفارغة حتى لا نرسل طلبات كثيرة بلا داعٍ.
+EXPECTED_PROBE_MAX_MISSES = 2
+
+EXPECTED_CHAPTER_CONFIRMED_SCORE = 1100
+EXPECTED_CHAPTER_SEARCH_SCORE = 950
+
+
+# ============================================================
+# API PATHS
+# ============================================================
 
 COMMON_API_PATHS = (
     "/wp-json/",
@@ -42,6 +79,11 @@ COMMON_API_PATHS = (
     "/api/novels",
     "/api/episodes",
 )
+
+
+# ============================================================
+# HTTP HEADERS
+# ============================================================
 
 HTTP_HEADERS = {
     "User-Agent": (
@@ -84,11 +126,14 @@ def github_headers():
 
 
 def load_data():
+
     response = SESSION.get(
         GITHUB_API,
         headers=github_headers(),
         timeout=REQUEST_TIMEOUT,
-        params={"_": str(int(time.time()))},
+        params={
+            "_": str(int(time.time() * 1000))
+        },
     )
 
     response.raise_for_status()
@@ -108,6 +153,7 @@ def load_data():
 
 
 def save_data(data, sha):
+
     content = json.dumps(
         data,
         ensure_ascii=False,
@@ -132,8 +178,16 @@ def save_data(data, sha):
     )
 
     if response.status_code == 409:
-        print("[WARNING] data.json changed while monitoring.")
-        print("[WARNING] Changes were NOT overwritten.")
+
+        print(
+            "[WARNING] data.json changed "
+            "while monitoring."
+        )
+
+        print(
+            "[WARNING] Changes were NOT overwritten."
+        )
+
         return False
 
     response.raise_for_status()
@@ -146,6 +200,7 @@ def save_data(data, sha):
 # ============================================================
 
 def send_message(chat_id, text):
+
     response = SESSION.post(
         f"{TELEGRAM_API}/sendMessage",
         data={
@@ -168,7 +223,9 @@ def request_with_retry(
     timeout=REQUEST_TIMEOUT,
     headers=None,
     allow_redirects=True,
+    params=None,
 ):
+
     last_error = None
 
     request_headers = dict(HTTP_HEADERS)
@@ -176,23 +233,29 @@ def request_with_retry(
     if headers:
         request_headers.update(headers)
 
-    for attempt in range(1, MAX_RETRIES + 1):
+    for attempt in range(
+        1,
+        MAX_RETRIES + 1,
+    ):
 
         try:
 
-            separator = "&" if "?" in url else "?"
+            request_params = {}
 
-            request_url = (
-                f"{url}"
-                f"{separator}"
-                f"_monitor={int(time.time())}"
+            if params:
+                request_params.update(params)
+
+            # Cache buster فريد لكل طلب
+            request_params["_monitor"] = str(
+                time.time_ns()
             )
 
             response = SESSION.get(
-                request_url,
+                url,
                 headers=request_headers,
                 timeout=timeout,
                 allow_redirects=allow_redirects,
+                params=request_params,
             )
 
             if response.status_code in (
@@ -204,18 +267,60 @@ def request_with_retry(
                 503,
                 504,
             ):
-                raise requests.HTTPError(
+
+                error = requests.HTTPError(
                     f"Temporary HTTP status "
                     f"{response.status_code}"
                 )
+
+                error.response = response
+
+                raise error
 
             response.raise_for_status()
 
             return response
 
+        except requests.HTTPError as error:
+
+            last_error = error
+
+            status_code = None
+
+            if error.response is not None:
+                status_code = (
+                    error.response.status_code
+                )
+
+            # الأخطاء غير المؤقتة مثل 404 و403
+            # لا تحتاج إلى إعادة المحاولة.
+            if status_code not in (
+                408,
+                425,
+                429,
+                500,
+                502,
+                503,
+                504,
+            ):
+
+                raise
+
+            if attempt < MAX_RETRIES:
+
+                wait_time = attempt * 2
+
+                print(
+                    f"[RETRY] {url} "
+                    f"(attempt "
+                    f"{attempt + 1}/{MAX_RETRIES})"
+                )
+
+                time.sleep(wait_time)
+
         except (
-            requests.RequestException,
             requests.Timeout,
+            requests.ConnectionError,
         ) as error:
 
             last_error = error
@@ -226,15 +331,38 @@ def request_with_retry(
 
                 print(
                     f"[RETRY] {url} "
-                    f"(attempt {attempt + 1}/{MAX_RETRIES})"
+                    f"(attempt "
+                    f"{attempt + 1}/{MAX_RETRIES})"
                 )
 
                 time.sleep(wait_time)
 
-    raise last_error
+        except requests.RequestException as error:
+
+            last_error = error
+
+            if attempt < MAX_RETRIES:
+
+                wait_time = attempt * 2
+
+                print(
+                    f"[RETRY] {url} "
+                    f"(attempt "
+                    f"{attempt + 1}/{MAX_RETRIES})"
+                )
+
+                time.sleep(wait_time)
+
+    if last_error:
+        raise last_error
+
+    raise RuntimeError(
+        f"Request failed: {url}"
+    )
 
 
 def download_page(url):
+
     response = request_with_retry(
         url,
         timeout=REQUEST_TIMEOUT,
@@ -260,12 +388,16 @@ def download_page(url):
 
     if (
         "text/html" not in content_type
-        and "application/xhtml+xml" not in content_type
-        and "application/json" not in content_type
+        and "application/xhtml+xml"
+        not in content_type
+        and "application/json"
+        not in content_type
         and not looks_like_document
     ):
+
         raise ValueError(
-            f"Unsupported content type: {content_type}"
+            f"Unsupported content type: "
+            f"{content_type}"
         )
 
     return (
@@ -286,6 +418,7 @@ ARABIC_DIGITS = str.maketrans(
 
 
 def normalize_digits(value):
+
     if value is None:
         return ""
 
@@ -295,6 +428,7 @@ def normalize_digits(value):
 
 
 def normalize_number(value):
+
     if value is None:
         return None
 
@@ -322,12 +456,19 @@ def normalize_number(value):
 
 
 def display_chapter(chapter):
-    number = normalize_number(chapter)
+
+    number = normalize_number(
+        chapter
+    )
 
     if number is None:
         return "غير معروف"
 
-    if isinstance(number, float) and number.is_integer():
+    if (
+        isinstance(number, float)
+        and number.is_integer()
+    ):
+
         return str(int(number))
 
     return str(number)
@@ -355,7 +496,7 @@ STRONG_CHAPTER_PATTERNS = [
     # Chinese
     r"第\s*(\d+(?:\.\d+)?)\s*章",
 
-    # URL patterns
+    # URL
     r"/chapter/(\d+(?:\.\d+)?)",
     r"/chapter-(\d+(?:\.\d+)?)",
     r"/chapter_(\d+(?:\.\d+)?)",
@@ -368,10 +509,10 @@ STRONG_CHAPTER_PATTERNS = [
     r"/ch-(\d+(?:\.\d+)?)",
     r"/ch_(\d+(?:\.\d+)?)",
 
-    # Query parameters
+    # Query
     r"[?&](?:chapter|chap|ch|episode|ep)[=_-](\d+(?:\.\d+)?)",
 
-    # Explicit chapter IDs
+    # IDs
     r"\bchapter[-_ ]number\s*[:=]\s*(\d+(?:\.\d+)?)",
     r"\bchapter[-_ ]id\s*[:=]\s*(\d+(?:\.\d+)?)",
 ]
@@ -401,10 +542,6 @@ WEAK_CHAPTER_PATTERNS = [
 
     r"(?<!\d)(\d{1,7})\s+[ء-يA-Za-z][ء-يA-Za-z\s\-–—:]{2,}",
 
-    # هذا النمط لا نستخدمه كدليل قوي.
-    # لأنه قد يقرأ:
-    # "عنوان الفصل-1"
-    # على أنه الفصل 1.
     r"[^\d\n]{2,}\s*[-–—:]\s*(\d{1,7})(?!\d)",
 ]
 
@@ -429,18 +566,24 @@ EXPLICIT_CHAPTER_CONTEXT_PATTERNS = (
 
 
 def has_explicit_chapter_context(text):
+
     if not text:
         return False
 
-    text = normalize_digits(str(text))
+    text = normalize_digits(
+        str(text)
+    )
 
-    for pattern in EXPLICIT_CHAPTER_CONTEXT_PATTERNS:
+    for pattern in (
+        EXPLICIT_CHAPTER_CONTEXT_PATTERNS
+    ):
 
         if re.search(
             pattern,
             text,
             flags=re.IGNORECASE,
         ):
+
             return True
 
     return False
@@ -450,7 +593,10 @@ def is_suspicious_year(
     number,
     context="",
 ):
-    number = normalize_number(number)
+
+    number = normalize_number(
+        number
+    )
 
     if number is None:
         return False
@@ -460,7 +606,10 @@ def is_suspicious_year(
 
     if YEAR_MIN <= number <= YEAR_MAX:
 
-        if has_explicit_chapter_context(context):
+        if has_explicit_chapter_context(
+            context
+        ):
+
             return False
 
         return True
@@ -504,17 +653,22 @@ class Candidate:
         context="",
         url="",
     ):
+
         self.number = number
         self.score = score
+
         self.source = source
+
         self.context = str(
             context or ""
         )[:500]
+
         self.url = str(
             url or ""
         )[:1000]
 
     def __repr__(self):
+
         return (
             f"Candidate("
             f"{self.number}, "
@@ -558,7 +712,9 @@ def extract_matches(
     if not text:
         return []
 
-    text = normalize_digits(text)
+    text = normalize_digits(
+        text
+    )
 
     results = []
 
@@ -578,7 +734,11 @@ def extract_matches(
 
         for match in matches:
 
-            if isinstance(match, tuple):
+            if isinstance(
+                match,
+                tuple,
+            ):
+
                 match = match[0]
 
             number = normalize_number(
@@ -600,6 +760,7 @@ def extract_matches(
 
 
 def extract_url_start_chapters(url):
+
     if not url:
         return []
 
@@ -607,7 +768,9 @@ def extract_url_start_chapters(url):
 
     path = parsed.path or ""
 
-    path = normalize_digits(path)
+    path = normalize_digits(
+        path
+    )
 
     results = []
 
@@ -627,10 +790,16 @@ def extract_url_start_chapters(url):
 
         for match in matches:
 
-            if isinstance(match, tuple):
+            if isinstance(
+                match,
+                tuple,
+            ):
+
                 match = match[0]
 
-            number = normalize_number(match)
+            number = normalize_number(
+                match
+            )
 
             if number is None:
                 continue
@@ -638,7 +807,127 @@ def extract_url_start_chapters(url):
             if 1 <= number <= 1000000:
                 results.append(number)
 
-    return list(dict.fromkeys(results))
+    return list(
+        dict.fromkeys(results)
+    )
+
+
+# ============================================================
+# EXACT NUMBER DETECTION
+# ============================================================
+
+def contains_exact_number(
+    text,
+    number,
+):
+
+    if not text:
+        return False
+
+    normalized_text = normalize_digits(
+        text
+    )
+
+    normalized_number = normalize_number(
+        number
+    )
+
+    if normalized_number is None:
+        return False
+
+    if (
+        isinstance(
+            normalized_number,
+            float,
+        )
+        and normalized_number.is_integer()
+    ):
+
+        normalized_number = int(
+            normalized_number
+        )
+
+    pattern = (
+        rf"(?<!\d)"
+        rf"{re.escape(str(normalized_number))}"
+        rf"(?!\d)"
+    )
+
+    return bool(
+        re.search(
+            pattern,
+            normalized_text,
+        )
+    )
+
+
+def text_confirms_chapter(
+    text,
+    chapter_number,
+):
+
+    if not text:
+        return False
+
+    if chapter_number in extract_matches(
+        text,
+        STRONG_CHAPTER_PATTERNS,
+    ):
+
+        return True
+
+    normalized = normalize_digits(
+        text
+    ).strip()
+
+    number = display_chapter(
+        chapter_number
+    )
+
+    # مثل:
+    # 2477 - جهل
+    # 2477: Title
+    # 2477 -Title
+    pattern = (
+        rf"^\s*{re.escape(number)}"
+        r"\s*[-–—:._)]"
+    )
+
+    return bool(
+        re.search(
+            pattern,
+            normalized,
+        )
+    )
+
+
+def is_next_chapter_link_text(
+    text,
+):
+
+    if not text:
+        return False
+
+    normalized = (
+        normalize_digits(text)
+        .strip()
+        .lower()
+    )
+
+    next_words = (
+        "التالي",
+        "الفصل التالي",
+        "الموضوع التالي",
+        "next",
+        "next chapter",
+        "newer",
+        "newer chapter",
+    )
+
+    return any(
+        word in normalized
+        for word in next_words
+    )
 
 
 # ============================================================
@@ -653,9 +942,11 @@ def safe_json_loads(raw):
     raw = raw.strip()
 
     try:
+
         return json.loads(raw)
 
     except Exception:
+
         return None
 
 
@@ -718,29 +1009,26 @@ def collect_json_candidates(
 
     elif isinstance(obj, str):
 
-        text = obj
-
         add_candidates(
             candidates,
             extract_matches(
-                text,
+                obj,
                 STRONG_CHAPTER_PATTERNS,
             ),
             100,
             source,
-            text,
+            obj,
         )
 
-        # الضعيف يبقى منخفضًا جدًا.
         add_candidates(
             candidates,
             extract_matches(
-                text,
+                obj,
                 WEAK_CHAPTER_PATTERNS,
             ),
             20,
             source,
-            text,
+            obj,
         )
 
 
@@ -753,7 +1041,9 @@ def extract_from_json_text(
     if not raw:
         return
 
-    data = safe_json_loads(raw)
+    data = safe_json_loads(
+        raw
+    )
 
     if data is not None:
 
@@ -896,6 +1186,7 @@ def is_same_domain(
         )
 
     except Exception:
+
         return False
 
 
@@ -938,10 +1229,6 @@ def extract_from_links(
             strip=True,
         )
 
-        # ----------------------------------------------------
-        # Strong URL
-        # ----------------------------------------------------
-
         strong_numbers = extract_matches(
             href,
             STRONG_CHAPTER_PATTERNS,
@@ -960,10 +1247,6 @@ def extract_from_links(
 
             links_seen += 1
             continue
-
-        # ----------------------------------------------------
-        # Generic numeric chapter URL
-        # ----------------------------------------------------
 
         url_numbers = extract_url_start_chapters(
             href
@@ -1006,10 +1289,6 @@ def extract_from_links(
             links_seen += 1
             continue
 
-        # ----------------------------------------------------
-        # Link text
-        # ----------------------------------------------------
-
         if text:
 
             add_candidates(
@@ -1024,7 +1303,6 @@ def extract_from_links(
                 href,
             )
 
-            # لا نعطي weak link text وزنًا كبيرًا.
             add_candidates(
                 candidates,
                 extract_matches(
@@ -1037,11 +1315,9 @@ def extract_from_links(
                 href,
             )
 
-        # ----------------------------------------------------
-        # Query parameter
-        # ----------------------------------------------------
-
-        parsed = urlparse(href)
+        parsed = urlparse(
+            href
+        )
 
         query = parse_qs(
             parsed.query
@@ -1134,10 +1410,20 @@ def extract_from_data_attributes(
             ):
                 continue
 
-            if isinstance(value, list):
-                value = " ".join(value)
+            if isinstance(
+                value,
+                list,
+            ):
 
-            if not isinstance(value, str):
+                value = " ".join(
+                    value
+                )
+
+            if not isinstance(
+                value,
+                str,
+            ):
+
                 continue
 
             attribute_lower = (
@@ -1417,8 +1703,6 @@ def extract_from_page_text(
         text,
     )
 
-    # الضعيف منخفض جدًا حتى لا يحوّل
-    # أرقامًا داخل عناوين فرعية إلى فصول.
     add_candidates(
         candidates,
         extract_matches(
@@ -1504,7 +1788,9 @@ def discover_related_pages(
         soup,
     )
 
-    urls.update(pagination)
+    urls.update(
+        pagination
+    )
 
     for link in soup.find_all("a"):
 
@@ -1557,7 +1843,9 @@ def discover_related_pages(
 
 def get_base_url(url):
 
-    parsed = urlparse(url)
+    parsed = urlparse(
+        url
+    )
 
     return (
         f"{parsed.scheme}://"
@@ -1637,7 +1925,9 @@ def extract_from_api(
         soup,
     )
 
-    api_urls = list(api_urls)[:20]
+    api_urls = list(
+        api_urls
+    )[:20]
 
     for api_url in api_urls:
 
@@ -1824,10 +2114,12 @@ def discover_chapters_from_related_pages(
 
         try:
 
-            related_html, final_url, _ = (
-                download_page(
-                    related_url
-                )
+            (
+                related_html,
+                final_url,
+                _,
+            ) = download_page(
+                related_url
             )
 
             related_soup = BeautifulSoup(
@@ -1921,6 +2213,810 @@ def discover_chapters_from_related_pages(
 
 
 # ============================================================
+# DIRECT PROBE - CURRENT PAGE
+# ============================================================
+
+def probe_current_page_for_expected(
+    soup,
+    page_url,
+    expected_chapter,
+    candidates,
+):
+
+    found = False
+
+    for link in soup.find_all("a"):
+
+        href = link.get("href")
+
+        if not href:
+            continue
+
+        href = urljoin(
+            page_url,
+            href,
+        )
+
+        if not is_same_domain(
+            page_url,
+            href,
+        ):
+            continue
+
+        text = link.get_text(
+            " ",
+            strip=True,
+        )
+
+        url_numbers = extract_url_start_chapters(
+            href
+        )
+
+        if expected_chapter in url_numbers:
+
+            if is_next_chapter_link_text(
+                text
+            ):
+
+                score = 1500
+
+                source = (
+                    "expected next chapter link"
+                )
+
+            else:
+
+                score = 1300
+
+                source = (
+                    "expected chapter URL"
+                )
+
+            candidates.append(
+                Candidate(
+                    expected_chapter,
+                    score,
+                    source,
+                    text or href,
+                    href,
+                )
+            )
+
+            print(
+                "[PROBE] Current page contains "
+                f"chapter {expected_chapter}:"
+            )
+
+            print(
+                f"        {href}"
+            )
+
+            found = True
+
+            continue
+
+        if text_confirms_chapter(
+            text,
+            expected_chapter,
+        ):
+
+            candidates.append(
+                Candidate(
+                    expected_chapter,
+                    1150,
+                    "expected chapter link text",
+                    text,
+                    href,
+                )
+            )
+
+            print(
+                "[PROBE] Current page link "
+                f"confirms chapter {expected_chapter}:"
+            )
+
+            print(
+                f"        {text[:180]}"
+            )
+
+            found = True
+
+    # title + headings
+
+    for tag in soup.find_all(
+        [
+            "title",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+        ]
+    ):
+
+        text = tag.get_text(
+            " ",
+            strip=True,
+        )
+
+        if not text:
+            continue
+
+        if not text_confirms_chapter(
+            text,
+            expected_chapter,
+        ):
+            continue
+
+        candidates.append(
+            Candidate(
+                expected_chapter,
+                1100,
+                "expected chapter heading",
+                text,
+                page_url,
+            )
+        )
+
+        print(
+            "[PROBE] Current page heading/title "
+            f"confirms chapter {expected_chapter}:"
+        )
+
+        print(
+            f"        {text[:180]}"
+        )
+
+        found = True
+
+    return found
+
+
+# ============================================================
+# FIND OLD CHAPTER URLS
+# ============================================================
+
+def find_old_chapter_urls(
+    soup,
+    page_url,
+    old_chapter,
+):
+
+    old_number = normalize_number(
+        old_chapter
+    )
+
+    if old_number is None:
+        return []
+
+    urls = []
+
+    for link in soup.find_all("a"):
+
+        href = link.get("href")
+
+        if not href:
+            continue
+
+        href = urljoin(
+            page_url,
+            href,
+        )
+
+        if not is_same_domain(
+            page_url,
+            href,
+        ):
+            continue
+
+        numbers = extract_url_start_chapters(
+            href
+        )
+
+        if old_number in numbers:
+
+            urls.append(href)
+
+            if len(urls) >= 3:
+                break
+
+    return list(
+        dict.fromkeys(urls)
+    )
+
+
+# ============================================================
+# DIRECT PROBE - PREVIOUS CHAPTER PAGE
+# ============================================================
+
+def probe_previous_chapter_page(
+    soup,
+    page_url,
+    old_chapter,
+    expected_chapter,
+    candidates,
+):
+
+    old_urls = find_old_chapter_urls(
+        soup,
+        page_url,
+        old_chapter,
+    )
+
+    if not old_urls:
+
+        print(
+            "[PROBE] Recorded chapter page "
+            f"{old_chapter} was not found "
+            "on the main page."
+        )
+
+        return False
+
+    found = False
+
+    for old_url in old_urls:
+
+        try:
+
+            print(
+                "[PROBE] Checking recorded "
+                "chapter page:"
+            )
+
+            print(
+                f"        {old_url}"
+            )
+
+            (
+                old_html,
+                old_final_url,
+                _,
+            ) = download_page(
+                old_url
+            )
+
+            old_soup = BeautifulSoup(
+                old_html,
+                "html.parser",
+            )
+
+            for link in old_soup.find_all(
+                "a"
+            ):
+
+                href = link.get("href")
+
+                if not href:
+                    continue
+
+                href = urljoin(
+                    old_final_url,
+                    href,
+                )
+
+                if not is_same_domain(
+                    old_final_url,
+                    href,
+                ):
+                    continue
+
+                text = link.get_text(
+                    " ",
+                    strip=True,
+                )
+
+                url_numbers = (
+                    extract_url_start_chapters(
+                        href
+                    )
+                )
+
+                if expected_chapter not in url_numbers:
+                    continue
+
+                if is_next_chapter_link_text(
+                    text
+                ):
+
+                    score = 1600
+
+                    source = (
+                        "expected next chapter "
+                        "from previous page"
+                    )
+
+                else:
+
+                    score = 1450
+
+                    source = (
+                        "expected chapter "
+                        "from previous page"
+                    )
+
+                candidates.append(
+                    Candidate(
+                        expected_chapter,
+                        score,
+                        source,
+                        text or href,
+                        href,
+                    )
+                )
+
+                print(
+                    "[PROBE] Previous chapter page "
+                    f"points to {expected_chapter}:"
+                )
+
+                print(
+                    f"        {href}"
+                )
+
+                found = True
+
+        except Exception as error:
+
+            print(
+                "[PROBE] Previous chapter page "
+                f"failed: {error}"
+            )
+
+    return found
+
+
+# ============================================================
+# WORDPRESS SEARCH RESULT HELPERS
+# ============================================================
+
+def get_wp_result_url(item):
+
+    if not isinstance(
+        item,
+        dict,
+    ):
+        return ""
+
+    for key in (
+        "url",
+        "link",
+    ):
+
+        value = item.get(
+            key
+        )
+
+        if value:
+            return str(
+                value
+            )
+
+    return ""
+
+
+def get_wp_result_title(item):
+
+    if not isinstance(
+        item,
+        dict,
+    ):
+        return ""
+
+    title_data = item.get(
+        "title",
+        "",
+    )
+
+    if isinstance(
+        title_data,
+        dict,
+    ):
+
+        return str(
+            title_data.get(
+                "rendered",
+                "",
+            )
+            or ""
+        )
+
+    return str(
+        title_data or ""
+    )
+
+
+def wp_result_is_exact_chapter(
+    item,
+    chapter_number,
+):
+
+    item_url = get_wp_result_url(
+        item
+    )
+
+    title = get_wp_result_title(
+        item
+    )
+
+    # URL مثل:
+    # /2477-جهل/
+    if chapter_number in extract_url_start_chapters(
+        item_url
+    ):
+
+        return True
+
+    # بعض نتائج WordPress قد تستخدم رابطًا
+    # لا يبدأ بالرقم، لذلك نفحص العنوان أيضًا.
+    if text_confirms_chapter(
+        title,
+        chapter_number,
+    ):
+
+        return True
+
+    return False
+
+
+# ============================================================
+# WORDPRESS DIRECT SEARCH
+# ============================================================
+
+def probe_wordpress_search(
+    page_url,
+    chapter_number,
+    candidates,
+):
+
+    base_url = get_base_url(
+        page_url
+    )
+
+    search_url = urljoin(
+        base_url,
+        "/wp-json/wp/v2/search",
+    )
+
+    print(
+        "[WP PROBE] Searching for "
+        f"chapter {chapter_number}..."
+    )
+
+    try:
+
+        response = request_with_retry(
+            search_url,
+            timeout=API_TIMEOUT,
+            params={
+                "search": str(
+                    chapter_number
+                ),
+                "per_page": "20",
+            },
+        )
+
+    except Exception as error:
+
+        print(
+            "[WP PROBE] Search failed for "
+            f"{chapter_number}: {error}"
+        )
+
+        return False
+
+    try:
+
+        data = response.json()
+
+    except Exception:
+
+        print(
+            "[WP PROBE] Invalid JSON for "
+            f"{chapter_number}."
+        )
+
+        return False
+
+    if not isinstance(
+        data,
+        list,
+    ):
+
+        return False
+
+    found = False
+
+    for item in data:
+
+        if not wp_result_is_exact_chapter(
+            item,
+            chapter_number,
+        ):
+            continue
+
+        item_url = get_wp_result_url(
+            item
+        )
+
+        title = get_wp_result_title(
+            item
+        )
+
+        confirmed = False
+        final_url = item_url
+
+        # إذا كانت لدينا صفحة حقيقية، نفتحها
+        # للتأكد من أن الرقم هو رقم الفصل.
+        if item_url:
+
+            try:
+
+                (
+                    chapter_html,
+                    checked_url,
+                    _,
+                ) = download_page(
+                    item_url
+                )
+
+                final_url = (
+                    checked_url
+                    or item_url
+                )
+
+                chapter_soup = BeautifulSoup(
+                    chapter_html,
+                    "html.parser",
+                )
+
+                # تأكيد من الرابط النهائي
+                if chapter_number in extract_url_start_chapters(
+                    final_url
+                ):
+
+                    confirmed = True
+
+                # تأكيد من title / H1
+                if not confirmed:
+
+                    texts_to_check = []
+
+                    if chapter_soup.title:
+
+                        texts_to_check.append(
+                            chapter_soup.title.get_text(
+                                " ",
+                                strip=True,
+                            )
+                        )
+
+                    for h1 in chapter_soup.find_all(
+                        "h1"
+                    )[:3]:
+
+                        texts_to_check.append(
+                            h1.get_text(
+                                " ",
+                                strip=True,
+                            )
+                        )
+
+                    for text in texts_to_check:
+
+                        if text_confirms_chapter(
+                            text,
+                            chapter_number,
+                        ):
+
+                            confirmed = True
+                            break
+
+            except Exception as error:
+
+                print(
+                    "[WP PROBE] Could not verify "
+                    f"chapter page {chapter_number}: "
+                    f"{error}"
+                )
+
+        if confirmed:
+
+            score = (
+                EXPECTED_CHAPTER_CONFIRMED_SCORE
+            )
+
+            source = (
+                "WordPress expected chapter "
+                "confirmed"
+            )
+
+        else:
+
+            score = (
+                EXPECTED_CHAPTER_SEARCH_SCORE
+            )
+
+            source = (
+                "WordPress expected chapter"
+            )
+
+        candidates.append(
+            Candidate(
+                chapter_number,
+                score,
+                source,
+                title or item_url,
+                final_url or item_url,
+            )
+        )
+
+        print(
+            "[WP PROBE] FOUND chapter "
+            f"{chapter_number}"
+            f" | confirmed={confirmed}"
+        )
+
+        if title:
+
+            print(
+                f"        {title[:180]}"
+            )
+
+        if final_url:
+
+            print(
+                f"        {final_url[:250]}"
+            )
+
+        found = True
+
+        # لا نحتاج إلى إضافة نفس الفصل
+        # من عدة نتائج WordPress.
+        break
+
+    if not found:
+
+        print(
+            "[WP PROBE] Chapter "
+            f"{chapter_number} not found."
+        )
+
+    return found
+
+
+# ============================================================
+# DIRECT EXPECTED CHAPTER PROBE
+# ============================================================
+
+def probe_expected_chapters(
+    page_url,
+    soup,
+    old_chapter,
+    candidates,
+):
+
+    old_number = normalize_number(
+        old_chapter
+    )
+
+    if old_number is None:
+        return
+
+    if not isinstance(
+        old_number,
+        (int, float),
+    ):
+        return
+
+    if (
+        isinstance(
+            old_number,
+            float,
+        )
+        and not old_number.is_integer()
+    ):
+
+        # نتجنب التخمين للفصول العشرية.
+        return
+
+    old_number = int(
+        old_number
+    )
+
+    first_expected = (
+        old_number + 1
+    )
+
+    print("")
+    print(
+        "[PROBE] ========================================="
+    )
+
+    print(
+        "[PROBE] DIRECT EXPECTED-CHAPTER PROBE"
+    )
+
+    print(
+        f"[PROBE] Recorded chapter: {old_number}"
+    )
+
+    print(
+        f"[PROBE] Will check up to: "
+        f"{old_number + EXPECTED_PROBE_AHEAD}"
+    )
+
+    # --------------------------------------------------------
+    # 1. الصفحة الرئيسية
+    # --------------------------------------------------------
+
+    probe_current_page_for_expected(
+        soup,
+        page_url,
+        first_expected,
+        candidates,
+    )
+
+    # --------------------------------------------------------
+    # 2. صفحة الفصل السابق
+    # --------------------------------------------------------
+
+    probe_previous_chapter_page(
+        soup,
+        page_url,
+        old_number,
+        first_expected,
+        candidates,
+    )
+
+    # --------------------------------------------------------
+    # 3. WordPress Search
+    # --------------------------------------------------------
+
+    consecutive_misses = 0
+
+    for offset in range(
+        EXPECTED_PROBE_AHEAD
+    ):
+
+        chapter_number = (
+            first_expected
+            + offset
+        )
+
+        found = probe_wordpress_search(
+            page_url,
+            chapter_number,
+            candidates,
+        )
+
+        if found:
+
+            consecutive_misses = 0
+
+        else:
+
+            consecutive_misses += 1
+
+            if (
+                consecutive_misses
+                >= EXPECTED_PROBE_MAX_MISSES
+            ):
+
+                print(
+                    "[PROBE] Stopping future "
+                    "chapter search after "
+                    f"{consecutive_misses} "
+                    "consecutive misses."
+                )
+
+                break
+
+    print(
+        "[PROBE] ========================================="
+    )
+
+
+# ============================================================
 # CANDIDATE FILTERING
 # ============================================================
 
@@ -1961,6 +3057,7 @@ def candidate_is_reasonable(
     if old is not None:
 
         if number > old + 100000:
+
             return False
 
     return True
@@ -1971,13 +3068,18 @@ def candidate_is_reasonable(
 # ============================================================
 
 def evidence_key(item):
+
     context = re.sub(
         r"\s+",
         " ",
         item.context.strip().lower(),
     )
 
-    url = item.url.strip().lower()
+    url = (
+        item.url
+        .strip()
+        .lower()
+    )
 
     return (
         item.source,
@@ -1992,36 +3094,29 @@ def score_number_group(
     old,
 ):
 
-    # --------------------------------------------------------
-    # لا نجمع كل التكرارات كما كان يحدث سابقًا.
-    #
-    # نفس العنوان قد يظهر 20 أو 30 مرة في الصفحة.
-    # لا يجب أن يجعل هذا الرقم أقوى 30 مرة.
-    # --------------------------------------------------------
-
     unique_evidence = {}
 
     for item in items:
 
-        key = evidence_key(item)
+        key = evidence_key(
+            item
+        )
 
         existing = unique_evidence.get(
             key
         )
 
         if existing is None:
+
             unique_evidence[key] = item
 
         elif item.score > existing.score:
+
             unique_evidence[key] = item
 
     unique_items = list(
         unique_evidence.values()
     )
-
-    # --------------------------------------------------------
-    # لكل مصدر نأخذ أقوى دليل بدل جمع التكرارات.
-    # --------------------------------------------------------
 
     source_best = {}
 
@@ -2034,19 +3129,17 @@ def score_number_group(
         )
 
         if existing is None:
+
             source_best[source] = item
 
         elif item.score > existing.score:
+
             source_best[source] = item
 
     total_score = sum(
         item.score
         for item in source_best.values()
     )
-
-    # --------------------------------------------------------
-    # تنوع المصادر
-    # --------------------------------------------------------
 
     source_count = len(
         source_best
@@ -2061,47 +3154,48 @@ def score_number_group(
     if source_count >= 4:
         total_score += 90
 
-    # --------------------------------------------------------
-    # العلاقة مع آخر فصل
-    # --------------------------------------------------------
-
     if old is not None:
 
         difference = number - old
 
-        # نفس الفصل الحالي
         if difference == 0:
+
             total_score += 250
 
-        # الفصل التالي
         elif difference == 1:
+
             total_score += 500
 
-        # عدة فصول جديدة
         elif 1 < difference <= 10:
+
             total_score += 300
 
         elif 10 < difference <= 100:
+
             total_score += 120
 
-        # فصل قديم
         elif difference < 0:
 
-            distance = abs(difference)
+            distance = abs(
+                difference
+            )
 
             if distance <= 2:
+
                 total_score -= 40
 
             elif distance <= 10:
+
                 total_score -= 120
 
             elif distance <= 100:
+
                 total_score -= 500
 
             else:
+
                 total_score -= 1200
 
-        # قفزة ضخمة
         elif difference > 100:
 
             explicit_evidence = any(
@@ -2117,21 +3211,21 @@ def score_number_group(
                     in evidence.source
                     or "sitemap chapter URL"
                     in evidence.source
+                    or "expected chapter"
+                    in evidence.source
+                    or "WordPress expected"
+                    in evidence.source
                 )
                 for evidence in unique_items
             )
 
             if explicit_evidence:
-                total_score += 20
-            else:
-                total_score -= 1000
 
-        # ----------------------------------------------------
-        # حماية إضافية:
-        #
-        # إذا كان الفصل الحالي في الآلاف، فلا ينبغي
-        # أن يهزم رقم صغير جدًا مثل 1 بسبب عنوان فرعي.
-        # ----------------------------------------------------
+                total_score += 20
+
+            else:
+
+                total_score -= 1000
 
         if (
             old >= 20
@@ -2148,16 +3242,40 @@ def score_number_group(
 
                 total_score -= 5000
 
-    # --------------------------------------------------------
-    # عدد الأدلة الفريدة له قيمة، لكن بحد أقصى.
-    # --------------------------------------------------------
-
     total_score += min(
         len(unique_items) * 8,
         80,
     )
 
     return total_score
+
+
+# ============================================================
+# DIRECT PROBE EVIDENCE
+# ============================================================
+
+def has_direct_probe_evidence(
+    item,
+):
+
+    for evidence in item.get(
+        "evidence",
+        [],
+    ):
+
+        source = (
+            evidence.source
+            or ""
+        ).lower()
+
+        if (
+            "expected" in source
+            or "wordpress expected" in source
+        ):
+
+            return True
+
+    return False
 
 
 # ============================================================
@@ -2219,6 +3337,56 @@ def rank_candidates(
         reverse=True,
     )
 
+    # --------------------------------------------------------
+    # IMPORTANT:
+    #
+    # إذا تم العثور على فصول مستقبلية بشكل مباشر،
+    # نختار أعلى فصل مستقبلي تم التحقق منه.
+    #
+    # مثال:
+    #
+    # 2476 = الفصل القديم
+    # 2477 = تم العثور عليه
+    # 2478 = تم العثور عليه
+    # 2479 = تم العثور عليه
+    #
+    # النتيجة النهائية = 2479
+    # --------------------------------------------------------
+
+    direct_probe_candidates = [
+        item
+        for item in ranked
+        if (
+            has_direct_probe_evidence(
+                item
+            )
+            and old is not None
+            and item["number"] > old
+        )
+    ]
+
+    if direct_probe_candidates:
+
+        highest_verified = max(
+            direct_probe_candidates,
+            key=lambda item: item["number"],
+        )
+
+        ranked.remove(
+            highest_verified
+        )
+
+        ranked.insert(
+            0,
+            highest_verified,
+        )
+
+        print(
+            "[RANKING] Direct probe verified "
+            f"new chapter: "
+            f"{display_chapter(highest_verified['number'])}"
+        )
+
     return ranked
 
 
@@ -2239,7 +3407,10 @@ def extract_latest_chapter(
 
     candidates = []
 
+    # --------------------------------------------------------
     # HTML
+    # --------------------------------------------------------
+
     extract_from_title(
         soup,
         candidates,
@@ -2267,7 +3438,10 @@ def extract_latest_chapter(
         candidates,
     )
 
+    # --------------------------------------------------------
     # Structured data
+    # --------------------------------------------------------
+
     extract_from_json_ld(
         soup,
         candidates,
@@ -2278,13 +3452,19 @@ def extract_latest_chapter(
         candidates,
     )
 
+    # --------------------------------------------------------
     # JavaScript
+    # --------------------------------------------------------
+
     extract_from_scripts(
         soup,
         candidates,
     )
 
+    # --------------------------------------------------------
     # Raw HTML + visible text
+    # --------------------------------------------------------
+
     extract_from_raw_html(
         html,
         candidates,
@@ -2295,7 +3475,10 @@ def extract_latest_chapter(
         candidates,
     )
 
+    # --------------------------------------------------------
     # Related chapter pages
+    # --------------------------------------------------------
+
     discover_chapters_from_related_pages(
         page_url,
         soup,
@@ -2303,27 +3486,52 @@ def extract_latest_chapter(
         candidates,
     )
 
-    # API
+    # --------------------------------------------------------
+    # Normal APIs
+    # --------------------------------------------------------
+
     extract_from_api(
         page_url,
         soup,
         candidates,
     )
 
+    # --------------------------------------------------------
     # Sitemap
+    # --------------------------------------------------------
+
     extract_from_sitemap(
         page_url,
         candidates,
     )
 
+    # ========================================================
+    # DIRECT EXPECTED CHAPTER PROBE
+    # ========================================================
+
+    probe_expected_chapters(
+        page_url,
+        soup,
+        old_chapter,
+        candidates,
+    )
+
+    # --------------------------------------------------------
     # Ranking
+    # --------------------------------------------------------
+
     ranked = rank_candidates(
         candidates,
         old_chapter,
     )
 
     if not ranked:
-        return None, None, []
+
+        return (
+            None,
+            None,
+            [],
+        )
 
     best = ranked[0]
 
@@ -2366,7 +3574,6 @@ def print_detection_details(
         "[DETECTION] Evidence:"
     )
 
-    # عرض أفضل الأدلة فقط
     evidence_sorted = sorted(
         best["evidence"],
         key=lambda item: item.score,
@@ -2402,7 +3609,8 @@ def print_detection_details(
         if evidence.url:
 
             print(
-                f"    URL: {evidence.url[:220]}"
+                f"    URL: "
+                f"{evidence.url[:220]}"
             )
 
         if context:
@@ -2423,9 +3631,7 @@ def print_detection_details(
             "Other candidates:"
         )
 
-        for item in ranked[
-            1:8
-        ]:
+        for item in ranked[1:8]:
 
             print(
                 "  - "
@@ -2478,7 +3684,7 @@ def monitor_work(
     )
 
     print(
-        f"[OLD] Last recorded chapter: "
+        "[OLD] Last recorded chapter: "
         f"{display_chapter(old_chapter)}"
     )
 
@@ -2513,7 +3719,8 @@ def monitor_work(
     )
 
     print(
-        f"[HTTP] Content-Type: {content_type}"
+        f"[HTTP] Content-Type: "
+        f"{content_type}"
     )
 
     # --------------------------------------------------------
@@ -2538,7 +3745,9 @@ def monitor_work(
             "[ERROR] Chapter detection failed."
         )
 
-        print(error)
+        print(
+            error
+        )
 
         return False
 
@@ -2625,7 +3834,8 @@ def monitor_work(
 
     print(
         "[NEW] "
-        f"Detected {difference} new chapter(s)."
+        f"Detected {difference} "
+        "new chapter(s)."
     )
 
     # --------------------------------------------------------
@@ -2678,7 +3888,9 @@ def monitor_work(
             "Telegram notification failed."
         )
 
-        print(error)
+        print(
+            error
+        )
 
         return False
 
@@ -2763,6 +3975,7 @@ def monitor_all_users(
                 )
 
                 if result:
+
                     changed = True
 
             except Exception as error:
@@ -2772,7 +3985,9 @@ def monitor_all_users(
                     "Unexpected work error:"
                 )
 
-                print(error)
+                print(
+                    error
+                )
 
     return changed
 
@@ -2810,6 +4025,16 @@ def main():
         "related pages + API + sitemap."
     )
 
+    print(
+        "[INFO] Direct expected-chapter "
+        "probing is ENABLED."
+    )
+
+    print(
+        "[INFO] Expected probe ahead: "
+        f"{EXPECTED_PROBE_AHEAD}"
+    )
+
     # --------------------------------------------------------
     # Load
     # --------------------------------------------------------
@@ -2825,7 +4050,9 @@ def main():
             "Could not load data.json"
         )
 
-        print(error)
+        print(
+            error
+        )
 
         raise
 
@@ -2846,7 +4073,9 @@ def main():
             "Monitoring failed."
         )
 
-        print(error)
+        print(
+            error
+        )
 
         raise
 
@@ -2890,7 +4119,9 @@ def main():
                 "Could not save data.json"
             )
 
-            print(error)
+            print(
+                error
+            )
 
             raise
 
