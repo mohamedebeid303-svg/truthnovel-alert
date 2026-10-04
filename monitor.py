@@ -5,7 +5,7 @@ import base64
 import time
 import html as html_module
 from dataclasses import dataclass
-from urllib.parse import urljoin, urlparse, parse_qs
+from urllib.parse import urljoin, urlparse, parse_qs, urlencode
 
 import requests
 from bs4 import BeautifulSoup
@@ -25,13 +25,24 @@ REQUEST_TIMEOUT = 30
 API_TIMEOUT = 15
 MAX_RETRIES = 3
 
-MAX_DISCOVERY_PAGES = 12
-MAX_CHAPTER_LINKS = 120
+MAX_DISCOVERY_PAGES = 15
+MAX_CHAPTER_LINKS = 180
 
+# How many future chapters should be probed.
 EXPECTED_PROBE_AHEAD = 5
-EXPECTED_PROBE_MAX_MISSES = 2
-EXPECTED_CHAPTER_CONFIRMED_SCORE = 1100
-EXPECTED_CHAPTER_SEARCH_SCORE = 950
+
+# Number of consecutive failed expected chapters
+# before stopping ONE probing method.
+EXPECTED_PROBE_MAX_MISSES = 3
+
+EXPECTED_CHAPTER_CONFIRMED_SCORE = 1200
+EXPECTED_CHAPTER_SEARCH_SCORE = 1050
+
+# Extra direct URL probing.
+DIRECT_URL_PROBES_ENABLED = True
+
+# Try several common WordPress/page URL patterns.
+DIRECT_URL_MAX_PATTERNS = 20
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -62,6 +73,7 @@ SESSION.headers.update(
 WORDPRESS_API_PATHS = [
     "/wp-json/",
     "/wp-json/wp/v2/search",
+    "/wp-json/wp/v2/posts",
 ]
 
 
@@ -91,11 +103,17 @@ PERMANENT_HTTP_STATUSES = {
 }
 
 TEMPORARY_HTTP_STATUSES = {
+    408,
+    425,
     429,
     500,
     502,
     503,
     504,
+    521,
+    522,
+    523,
+    524,
 }
 
 
@@ -454,19 +472,20 @@ def strip_monitor_parameter(url):
         None,
     )
 
-    query_parts = []
-
-    for key, values in query.items():
-        for value in values:
-            query_parts.append(
-                f"{key}={value}"
-            )
-
-    new_query = "&".join(query_parts)
+    new_query = urlencode(
+        query,
+        doseq=True,
+    )
 
     return parsed._replace(
         query=new_query
     ).geturl()
+
+
+def normalize_url(url):
+    return strip_monitor_parameter(
+        url
+    ).rstrip("/")
 
 
 # ============================================================
@@ -571,7 +590,7 @@ CHAPTER_TITLE_PATTERNS = [
 URL_PATTERNS = [
     re.compile(
         r"(?:chapter|chap|ch|episode)"
-        r"[-=/]*(\d+)",
+        r"[-_=/\s]*(\d+)",
         re.I,
     ),
     re.compile(
@@ -593,6 +612,40 @@ QUERY_KEYS = {
     "episode_id",
     "episodeid",
 }
+
+
+# ============================================================
+# NAVIGATION KEYWORDS
+# ============================================================
+
+NEXT_KEYWORDS = (
+    "next",
+    "next chapter",
+    "next post",
+    "newer",
+    "newer post",
+    "new chapter",
+    "following",
+    "التالي",
+    "الفصل التالي",
+    "الموضوع التالي",
+    "الجزء التالي",
+    "الفصل الجديد",
+)
+
+PREVIOUS_KEYWORDS = (
+    "previous",
+    "previous chapter",
+    "previous post",
+    "older",
+    "older post",
+    "prev",
+    "prev chapter",
+    "السابق",
+    "الفصل السابق",
+    "الموضوع السابق",
+    "الجزء السابق",
+)
 
 
 @dataclass
@@ -628,7 +681,7 @@ def unique_candidates(candidates):
 
         key = (
             candidate.number,
-            clean_url.rstrip("/"),
+            normalize_url(clean_url),
         )
 
         old = result.get(key)
@@ -751,19 +804,29 @@ def extract_chapter_number_from_text(text):
     return None
 
 
-def is_next_chapter_link_text(text):
-    text = clean_text(text).lower()
+def text_contains_keyword(
+    text,
+    keywords,
+):
+    lower = clean_text(text).lower()
 
     return any(
-        phrase in text
-        for phrase in (
-            "التالي",
-            "الفصل التالي",
-            "next",
-            "next chapter",
-            "newer",
-            "new chapter",
-        )
+        keyword.lower() in lower
+        for keyword in keywords
+    )
+
+
+def is_next_chapter_link_text(text):
+    return text_contains_keyword(
+        text,
+        NEXT_KEYWORDS,
+    )
+
+
+def is_previous_chapter_link_text(text):
+    return text_contains_keyword(
+        text,
+        PREVIOUS_KEYWORDS,
     )
 
 
@@ -806,6 +869,77 @@ def extract_chapter_number_from_url(url):
 
 
 # ============================================================
+# LINK METADATA
+# ============================================================
+
+def get_link_text(link):
+    return clean_text(
+        " ".join(
+            x
+            for x in (
+                link.get_text(
+                    " ",
+                    strip=True,
+                ),
+                link.get(
+                    "title",
+                    "",
+                ),
+                link.get(
+                    "aria-label",
+                    "",
+                ),
+                link.get(
+                    "data-tooltip",
+                    "",
+                ),
+                link.get(
+                    "data-title",
+                    "",
+                ),
+            )
+            if x
+        )
+    )
+
+
+def get_link_target(
+    link,
+    page_url,
+):
+    href = link.get(
+        "href",
+        "",
+    ).strip()
+
+    if not href:
+        return None
+
+    if href.startswith(
+        (
+            "javascript:",
+            "mailto:",
+            "tel:",
+            "#",
+        )
+    ):
+        return None
+
+    target = urljoin(
+        page_url,
+        href,
+    )
+
+    if not is_valid_chapter_url(
+        target,
+        page_url,
+    ):
+        return None
+
+    return target
+
+
+# ============================================================
 # LINK EXTRACTION
 # ============================================================
 
@@ -828,63 +962,16 @@ def extract_from_links(
         if count >= MAX_CHAPTER_LINKS:
             break
 
-        href = link.get(
-            "href",
-            "",
-        ).strip()
+        absolute_url = get_link_target(
+            link,
+            page_url,
+        )
 
-        if not href or href.startswith(
-            (
-                "javascript:",
-                "mailto:",
-                "tel:",
-                "#",
-            )
-        ):
+        if not absolute_url:
             continue
 
-        absolute_url = urljoin(
-            page_url,
-            href,
-        )
-
-        if not is_valid_chapter_url(
-            absolute_url,
-            page_url,
-        ):
-            continue
-
-        text = clean_text(
-            link.get_text(
-                " ",
-                strip=True,
-            )
-        )
-
-        title = clean_text(
-            link.get(
-                "title",
-                "",
-            )
-        )
-
-        aria = clean_text(
-            link.get(
-                "aria-label",
-                "",
-            )
-        )
-
-        combined_text = clean_text(
-            " ".join(
-                x
-                for x in (
-                    text,
-                    title,
-                    aria,
-                )
-                if x
-            )
+        combined_text = get_link_text(
+            link
         )
 
         text_number = (
@@ -894,7 +981,7 @@ def extract_from_links(
         )
 
         if text_number is not None:
-            score = 600
+            score = 650
 
             if text_confirms_chapter(
                 combined_text,
@@ -908,7 +995,12 @@ def extract_from_links(
             if is_next_chapter_link_text(
                 combined_text
             ):
-                score += 100
+                score += 200
+
+            if is_previous_chapter_link_text(
+                combined_text
+            ):
+                score += 50
 
             add_candidate(
                 candidates,
@@ -922,73 +1014,161 @@ def extract_from_links(
             count += 1
             continue
 
-        for pattern in URL_PATTERNS:
-            match = pattern.search(
+        url_number = (
+            extract_chapter_number_from_url(
                 absolute_url
             )
+        )
 
-            if match:
-                number = normalize_number(
-                    match.group(1)
-                )
+        if url_number is not None:
+            score = 500
 
-                if number is not None:
-                    score = 400
+            if url_number in expected_numbers:
+                score += 450
 
-                    if number in expected_numbers:
-                        score += 350
+            if is_next_chapter_link_text(
+                combined_text
+            ):
+                score += 200
 
-                    add_candidate(
-                        candidates,
-                        number,
-                        absolute_url,
-                        "link-url",
-                        score,
-                        absolute_url,
+            add_candidate(
+                candidates,
+                url_number,
+                absolute_url,
+                "link-url",
+                score,
+                combined_text or absolute_url,
+            )
+
+            count += 1
+            continue
+
+        parsed = urlparse(
+            absolute_url
+        )
+
+        query = parse_qs(
+            parsed.query
+        )
+
+        found_query = False
+
+        for key, values in query.items():
+            if key.lower() in QUERY_KEYS:
+                for value in values:
+                    number = normalize_number(
+                        value
                     )
 
-                    count += 1
-                    break
+                    if number is not None:
+                        score = 500
 
-        else:
-            parsed = urlparse(
-                absolute_url
-            )
+                        if number in expected_numbers:
+                            score += 450
 
-            query = parse_qs(
-                parsed.query
-            )
-
-            found_query = False
-
-            for key, values in query.items():
-                if key.lower() in QUERY_KEYS:
-                    for value in values:
-                        number = normalize_number(
-                            value
+                        add_candidate(
+                            candidates,
+                            number,
+                            absolute_url,
+                            "query-param",
+                            score,
+                            f"{key}={value}",
                         )
 
-                        if number is not None:
-                            score = 450
+                        count += 1
+                        found_query = True
+                        break
 
-                            if number in expected_numbers:
-                                score += 350
+            if found_query:
+                break
 
-                            add_candidate(
-                                candidates,
-                                number,
-                                absolute_url,
-                                "query-param",
-                                score,
-                                f"{key}={value}",
-                            )
 
-                            count += 1
-                            found_query = True
-                            break
+# ============================================================
+# NEXT / PREVIOUS NAVIGATION EXTRACTION
+# ============================================================
 
-                if found_query:
-                    break
+def extract_navigation_links(
+    soup,
+    page_url,
+):
+    next_links = []
+    previous_links = []
+
+    # --------------------------------------------------------
+    # rel="next" / rel="prev"
+    # --------------------------------------------------------
+
+    for link in soup.find_all(
+        "a",
+        href=True,
+    ):
+        target = get_link_target(
+            link,
+            page_url,
+        )
+
+        if not target:
+            continue
+
+        rel = link.get(
+            "rel",
+            [],
+        )
+
+        if isinstance(
+            rel,
+            str,
+        ):
+            rel = [rel]
+
+        rel_lower = {
+            str(x).lower()
+            for x in rel
+        }
+
+        if "next" in rel_lower:
+            next_links.append(target)
+
+        if (
+            "prev" in rel_lower
+            or "previous" in rel_lower
+        ):
+            previous_links.append(target)
+
+    # --------------------------------------------------------
+    # Text / aria / title
+    # --------------------------------------------------------
+
+    for link in soup.find_all(
+        "a",
+        href=True,
+    ):
+        target = get_link_target(
+            link,
+            page_url,
+        )
+
+        if not target:
+            continue
+
+        text = get_link_text(
+            link
+        )
+
+        if is_next_chapter_link_text(
+            text
+        ):
+            next_links.append(target)
+
+        if is_previous_chapter_link_text(
+            text
+        ):
+            previous_links.append(target)
+
+    return (
+        list(dict.fromkeys(next_links)),
+        list(dict.fromkeys(previous_links)),
+    )
 
 
 # ============================================================
@@ -1155,6 +1335,44 @@ def inspect_framework_data(
                 str(tag),
             )
 
+    # Extra data attributes.
+    for tag in soup.find_all():
+        for attr_name, attr_value in tag.attrs.items():
+            attr_lower = str(
+                attr_name
+            ).lower()
+
+            if (
+                "chapter" not in attr_lower
+                and "episode" not in attr_lower
+            ):
+                continue
+
+            if isinstance(
+                attr_value,
+                list,
+            ):
+                attr_value = " ".join(
+                    map(
+                        str,
+                        attr_value,
+                    )
+                )
+
+            number = normalize_number(
+                attr_value
+            )
+
+            if number is not None:
+                add_candidate(
+                    candidates,
+                    number,
+                    page_url,
+                    "data-attribute-extra",
+                    650,
+                    f"{attr_name}={attr_value}",
+                )
+
 
 # ============================================================
 # PAGE TEXT / HEADINGS
@@ -1199,7 +1417,7 @@ def inspect_page_text(
                 number,
                 page_url,
                 "title",
-                800,
+                900,
                 title,
             )
 
@@ -1227,9 +1445,16 @@ def inspect_page_text(
         if number is None:
             continue
 
+        # If URL has a chapter number and heading has
+        # another number, the heading is not automatically
+        # trusted unless it strongly confirms a chapter.
         if (
             page_url_chapter is not None
             and number != page_url_chapter
+            and not text_confirms_chapter(
+                text,
+                number,
+            )
         ):
             continue
 
@@ -1238,7 +1463,7 @@ def inspect_page_text(
             number,
             page_url,
             "heading",
-            850,
+            900,
             text,
         )
 
@@ -1263,6 +1488,171 @@ def inspect_page_text(
 
 
 # ============================================================
+# PAGE CHAPTER CONFIRMATION
+# ============================================================
+
+def page_confirms_chapter(
+    soup,
+    page_url,
+    expected,
+):
+    evidence = []
+
+    # --------------------------------------------------------
+    # URL
+    # --------------------------------------------------------
+
+    url_number = (
+        extract_chapter_number_from_url(
+            page_url
+        )
+    )
+
+    if url_number == expected:
+        evidence.append(
+            f"URL={expected}"
+        )
+
+    # --------------------------------------------------------
+    # Title
+    # --------------------------------------------------------
+
+    if soup.title:
+        title = clean_text(
+            soup.title.get_text(
+                " ",
+                strip=True,
+            )
+        )
+
+        if text_confirms_chapter(
+            title,
+            expected,
+        ):
+            evidence.append(
+                f"title={title}"
+            )
+
+    # --------------------------------------------------------
+    # Headings
+    # --------------------------------------------------------
+
+    for heading in soup.find_all(
+        [
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+        ]
+    ):
+        text = clean_text(
+            heading.get_text(
+                " ",
+                strip=True,
+            )
+        )
+
+        if text_confirms_chapter(
+            text,
+            expected,
+        ):
+            evidence.append(
+                f"heading={text}"
+            )
+
+    # --------------------------------------------------------
+    # Strong page text
+    # --------------------------------------------------------
+
+    body_text = clean_text(
+        soup.get_text(
+            " ",
+            strip=True,
+        )
+    )
+
+    if text_confirms_chapter(
+        body_text,
+        expected,
+    ):
+        evidence.append(
+            "body-text"
+        )
+
+    # --------------------------------------------------------
+    # Structured data
+    # --------------------------------------------------------
+
+    for tag in soup.find_all(
+        attrs={"data-chapter": True}
+    ):
+        number = normalize_number(
+            tag.get(
+                "data-chapter"
+            )
+        )
+
+        if number == expected:
+            evidence.append(
+                "data-chapter"
+            )
+
+    return (
+        len(evidence) > 0,
+        evidence[:5],
+    )
+
+
+def inspect_candidate_page(
+    url,
+    expected,
+    candidates,
+    source,
+):
+    if not url:
+        return False
+
+    body, final_url = download_page(
+        url
+    )
+
+    if not body:
+        return False
+
+    actual_url = (
+        final_url
+        or url
+    )
+
+    soup = BeautifulSoup(
+        body,
+        "html.parser",
+    )
+
+    confirmed, evidence = (
+        page_confirms_chapter(
+            soup,
+            actual_url,
+            expected,
+        )
+    )
+
+    if confirmed:
+        add_candidate(
+            candidates,
+            expected,
+            actual_url,
+            source,
+            EXPECTED_CHAPTER_CONFIRMED_SCORE,
+            " | ".join(evidence),
+        )
+
+        return True
+
+    return False
+
+
+# ============================================================
 # PAGINATION / RELATED PAGES
 # ============================================================
 
@@ -1272,41 +1662,35 @@ def discover_related_pages(
 ):
     pages = []
 
+    next_links, previous_links = (
+        extract_navigation_links(
+            soup,
+            page_url,
+        )
+    )
+
+    pages.extend(
+        next_links
+    )
+
+    pages.extend(
+        previous_links
+    )
+
     for link in soup.find_all(
         "a",
         href=True,
     ):
-        href = link.get(
-            "href",
-            "",
-        ).strip()
-
-        if not href or href.startswith(
-            (
-                "javascript:",
-                "mailto:",
-                "tel:",
-                "#",
-            )
-        ):
-            continue
-
-        absolute = urljoin(
+        target = get_link_target(
+            link,
             page_url,
-            href,
         )
 
-        if not is_valid_chapter_url(
-            absolute,
-            page_url,
-        ):
+        if not target:
             continue
 
-        text = clean_text(
-            link.get_text(
-                " ",
-                strip=True,
-            )
+        text = get_link_text(
+            link
         )
 
         lower = text.lower()
@@ -1315,19 +1699,26 @@ def discover_related_pages(
             is_next_chapter_link_text(
                 text
             )
+            or is_previous_chapter_link_text(
+                text
+            )
             or "older" in lower
             or "previous" in lower
-            or "الفصل السابق" in text
-            or "السابق" in text
+            or "prev" in lower
+            or "newer" in lower
             or extract_chapter_number_from_text(
                 text
+            )
+            is not None
+            or extract_chapter_number_from_url(
+                target
             )
             is not None
         )
 
         if is_relevant:
             pages.append(
-                absolute
+                target
             )
 
     return list(
@@ -1400,6 +1791,10 @@ def probe_api_and_sitemap(
         f"{parsed.netloc}"
     )
 
+    # --------------------------------------------------------
+    # WordPress APIs
+    # --------------------------------------------------------
+
     for path in WORDPRESS_API_PATHS:
         url = urljoin(
             origin,
@@ -1452,10 +1847,16 @@ def probe_api_and_sitemap(
                     "API chapter pattern",
                 )
 
+    # --------------------------------------------------------
+    # Sitemaps
+    # --------------------------------------------------------
+
     for sitemap_path in (
         "/sitemap.xml",
         "/post-sitemap.xml",
         "/sitemap_index.xml",
+        "/wp-sitemap.xml",
+        "/wp-sitemap-posts-post-1.xml",
     ):
         url = urljoin(
             origin,
@@ -1486,10 +1887,17 @@ def probe_api_and_sitemap(
                 continue
 
             number = (
-                extract_chapter_number_from_text(
+                extract_chapter_number_from_url(
                     target
                 )
             )
+
+            if number is None:
+                number = (
+                    extract_chapter_number_from_text(
+                        target
+                    )
+                )
 
             if number is not None:
                 add_candidate(
@@ -1497,13 +1905,13 @@ def probe_api_and_sitemap(
                     number,
                     target,
                     "sitemap",
-                    450,
+                    500,
                     target,
                 )
 
 
 # ============================================================
-# DIRECT EXPECTED CHAPTER PROBES
+# CURRENT PAGE EXPECTED CHAPTER PROBING
 # ============================================================
 
 def probe_current_page_for_expected_range(
@@ -1519,48 +1927,24 @@ def probe_current_page_for_expected_range(
     if not expected_numbers:
         return
 
+    # --------------------------------------------------------
+    # Normal links
+    # --------------------------------------------------------
+
     for link in soup.find_all(
         "a",
         href=True,
     ):
-        href = link.get(
-            "href",
-            "",
-        ).strip()
-
-        if not href:
-            continue
-
-        target = urljoin(
+        target = get_link_target(
+            link,
             page_url,
-            href,
         )
 
-        if not is_valid_chapter_url(
-            target,
-            page_url,
-        ):
+        if not target:
             continue
 
-        text = clean_text(
-            " ".join(
-                x
-                for x in (
-                    link.get_text(
-                        " ",
-                        strip=True,
-                    ),
-                    link.get(
-                        "title",
-                        "",
-                    ),
-                    link.get(
-                        "aria-label",
-                        "",
-                    ),
-                )
-                if x
-            )
+        text = get_link_text(
+            link
         )
 
         number = (
@@ -1569,6 +1953,13 @@ def probe_current_page_for_expected_range(
             )
         )
 
+        if number is None:
+            number = (
+                extract_chapter_number_from_url(
+                    target
+                )
+            )
+
         if number in expected_numbers:
             add_candidate(
                 candidates,
@@ -1576,33 +1967,41 @@ def probe_current_page_for_expected_range(
                 target,
                 "DIRECT_CURRENT_PAGE",
                 EXPECTED_CHAPTER_CONFIRMED_SCORE,
-                text,
+                text or target,
             )
 
-            continue
+    # --------------------------------------------------------
+    # Navigation links
+    # --------------------------------------------------------
 
-        for pattern in URL_PATTERNS:
-            match = pattern.search(
+    next_links, _ = (
+        extract_navigation_links(
+            soup,
+            page_url,
+        )
+    )
+
+    for target in next_links:
+        number = (
+            extract_chapter_number_from_url(
                 target
             )
+        )
 
-            if match:
-                number = normalize_number(
-                    match.group(1)
-                )
+        if number in expected_numbers:
+            add_candidate(
+                candidates,
+                number,
+                target,
+                "DIRECT_NAVIGATION",
+                EXPECTED_CHAPTER_CONFIRMED_SCORE + 100,
+                target,
+            )
 
-                if number in expected_numbers:
-                    add_candidate(
-                        candidates,
-                        number,
-                        target,
-                        "DIRECT_CURRENT_URL",
-                        EXPECTED_CHAPTER_CONFIRMED_SCORE,
-                        target,
-                    )
 
-                    break
-
+# ============================================================
+# FIND OLD CHAPTER URLS
+# ============================================================
 
 def find_old_chapter_urls(
     soup,
@@ -1615,44 +2014,16 @@ def find_old_chapter_urls(
         "a",
         href=True,
     ):
-        href = link.get(
-            "href",
-            "",
-        ).strip()
-
-        if not href:
-            continue
-
-        target = urljoin(
+        target = get_link_target(
+            link,
             page_url,
-            href,
         )
 
-        if not is_valid_chapter_url(
-            target,
-            page_url,
-        ):
+        if not target:
             continue
 
-        text = clean_text(
-            " ".join(
-                x
-                for x in (
-                    link.get_text(
-                        " ",
-                        strip=True,
-                    ),
-                    link.get(
-                        "title",
-                        "",
-                    ),
-                    link.get(
-                        "aria-label",
-                        "",
-                    ),
-                )
-                if x
-            )
+        text = get_link_text(
+            link
         )
 
         text_number = (
@@ -1665,25 +2036,23 @@ def find_old_chapter_urls(
             urls.append(target)
             continue
 
-        for pattern in URL_PATTERNS:
-            match = pattern.search(
+        url_number = (
+            extract_chapter_number_from_url(
                 target
             )
+        )
 
-            if (
-                match
-                and normalize_number(
-                    match.group(1)
-                )
-                == old_chapter
-            ):
-                urls.append(target)
-                break
+        if url_number == old_chapter:
+            urls.append(target)
 
     return list(
         dict.fromkeys(urls)
     )
 
+
+# ============================================================
+# PREVIOUS CHAPTER PAGE PROBING
+# ============================================================
 
 def probe_previous_chapter_page(
     soup,
@@ -1698,7 +2067,23 @@ def probe_previous_chapter_page(
         old_chapter,
     )
 
-    for old_url in old_urls[:3]:
+    # Add explicit previous-navigation URLs.
+    _, previous_links = (
+        extract_navigation_links(
+            soup,
+            page_url,
+        )
+    )
+
+    old_urls.extend(
+        previous_links
+    )
+
+    old_urls = list(
+        dict.fromkeys(old_urls)
+    )
+
+    for old_url in old_urls[:5]:
         body, final_url = download_page(
             old_url
         )
@@ -1723,6 +2108,23 @@ def probe_previous_chapter_page(
             candidates,
         )
 
+        # Also follow NEXT from the old chapter.
+        next_links, _ = (
+            extract_navigation_links(
+                old_soup,
+                actual_url,
+            )
+        )
+
+        for next_url in next_links[:3]:
+            for expected in expected_numbers:
+                inspect_candidate_page(
+                    next_url,
+                    expected,
+                    candidates,
+                    "DIRECT_PREVIOUS_NEXT",
+                )
+
         for element in old_soup.find_all(
             [
                 "title",
@@ -1744,17 +2146,15 @@ def probe_previous_chapter_page(
                 )
             )
 
-            if number not in expected_numbers:
-                continue
-
-            add_candidate(
-                candidates,
-                number,
-                actual_url,
-                "DIRECT_PREVIOUS_PAGE",
-                EXPECTED_CHAPTER_CONFIRMED_SCORE,
-                text,
-            )
+            if number in expected_numbers:
+                add_candidate(
+                    candidates,
+                    number,
+                    actual_url,
+                    "DIRECT_PREVIOUS_PAGE",
+                    EXPECTED_CHAPTER_CONFIRMED_SCORE,
+                    text,
+                )
 
 
 # ============================================================
@@ -1816,19 +2216,14 @@ def wp_result_is_exact_chapter(
         else ""
     )
 
-    for pattern in URL_PATTERNS:
-        match = pattern.search(
+    url_number = (
+        extract_chapter_number_from_url(
             url
         )
+    )
 
-        if (
-            match
-            and normalize_number(
-                match.group(1)
-            )
-            == expected
-        ):
-            return True, url
+    if url_number == expected:
+        return True, url
 
     return (
         False,
@@ -1916,6 +2311,203 @@ def probe_wordpress_search(
                 evidence,
             )
 
+            inspect_candidate_page(
+                target,
+                expected,
+                candidates,
+                "WORDPRESS_PAGE_EXACT",
+            )
+
+
+# ============================================================
+# DIRECT URL GENERATION
+# ============================================================
+
+def build_direct_url_patterns(
+    base_url,
+    old_chapter,
+    expected,
+):
+    parsed = urlparse(
+        base_url
+    )
+
+    origin = (
+        f"{parsed.scheme}://"
+        f"{parsed.netloc}"
+    )
+
+    old_url_number = (
+        extract_chapter_number_from_url(
+            base_url
+        )
+    )
+
+    patterns = []
+
+    # --------------------------------------------------------
+    # Replace numeric chapter in current URL.
+    # --------------------------------------------------------
+
+    if old_url_number is not None:
+        replaced = re.sub(
+            rf"(?<!\d){old_url_number}(?!\d)",
+            str(expected),
+            base_url,
+            count=1,
+        )
+
+        patterns.append(
+            replaced
+        )
+
+    # --------------------------------------------------------
+    # Common direct WordPress formats.
+    # --------------------------------------------------------
+
+    patterns.extend(
+        [
+            urljoin(
+                origin,
+                f"/chapter-{expected}/",
+            ),
+            urljoin(
+                origin,
+                f"/chapter/{expected}/",
+            ),
+            urljoin(
+                origin,
+                f"/chap-{expected}/",
+            ),
+            urljoin(
+                origin,
+                f"/ch-{expected}/",
+            ),
+            urljoin(
+                origin,
+                f"/ch{expected}/",
+            ),
+            urljoin(
+                origin,
+                f"/episode-{expected}/",
+            ),
+            urljoin(
+                origin,
+                f"/episode/{expected}/",
+            ),
+            urljoin(
+                origin,
+                f"/chapter/{expected}",
+            ),
+            urljoin(
+                origin,
+                f"/?chapter={expected}",
+            ),
+            urljoin(
+                origin,
+                f"/?chapter_id={expected}",
+            ),
+            urljoin(
+                origin,
+                f"/?ch={expected}",
+            ),
+            urljoin(
+                origin,
+                f"/?episode={expected}",
+            ),
+        ]
+    )
+
+    # --------------------------------------------------------
+    # If current path has a numeric component, replace it.
+    # --------------------------------------------------------
+
+    path = parsed.path
+
+    numeric_match = re.search(
+        r"(?<!\d)(\d{2,7})(?!\d)",
+        path,
+    )
+
+    if numeric_match:
+        old_number = numeric_match.group(1)
+
+        replaced_path = path.replace(
+            old_number,
+            str(expected),
+            1,
+        )
+
+        patterns.append(
+            parsed._replace(
+                path=replaced_path,
+                query="",
+            ).geturl()
+        )
+
+    # --------------------------------------------------------
+    # Generic slug-like WordPress pattern.
+    # --------------------------------------------------------
+
+    slug_match = re.search(
+        r"^(.*?)(\d{2,7})(.*)$",
+        path.rstrip("/"),
+    )
+
+    if slug_match:
+        prefix = slug_match.group(1)
+        suffix = slug_match.group(3)
+
+        patterns.append(
+            urljoin(
+                origin,
+                f"{prefix}{expected}{suffix}/",
+            )
+        )
+
+    # Remove duplicates.
+    result = []
+
+    for url in patterns:
+        if not is_valid_chapter_url(
+            url,
+            base_url,
+        ):
+            continue
+
+        normalized = normalize_url(
+            url
+        )
+
+        if normalized not in {
+            normalize_url(x)
+            for x in result
+        }:
+            result.append(url)
+
+        if len(result) >= DIRECT_URL_MAX_PATTERNS:
+            break
+
+    return result
+
+
+def probe_direct_urls(
+    base_url,
+    old_chapter,
+    expected_numbers,
+    candidates,
+):
+    if not DIRECT_URL_PROBES_ENABLED:
+        return
+
+    for expected in expected_numbers:
+        urls = build_direct_url_patterns(
+            base_url,
+            old_chapter,
+            expected,
+        )
+
+        for target in urls:
             body, final_url = download_page(
                 target
             )
@@ -1933,34 +2525,36 @@ def probe_wordpress_search(
                 "html.parser",
             )
 
-            for element in soup.find_all(
-                [
-                    "title",
-                    "h1",
-                    "h2",
-                    "h3",
-                ]
-            ):
-                text = clean_text(
-                    element.get_text(
-                        " ",
-                        strip=True,
-                    )
+            confirmed, evidence = (
+                page_confirms_chapter(
+                    soup,
+                    actual_url,
+                    expected,
+                )
+            )
+
+            if confirmed:
+                add_candidate(
+                    candidates,
+                    expected,
+                    actual_url,
+                    "DIRECT_URL_PROBE",
+                    EXPECTED_CHAPTER_CONFIRMED_SCORE,
+                    " | ".join(evidence),
                 )
 
-                if text_confirms_chapter(
-                    text,
-                    expected,
-                ):
-                    add_candidate(
-                        candidates,
-                        expected,
-                        actual_url,
-                        "WORDPRESS_PAGE_EXACT",
-                        EXPECTED_CHAPTER_CONFIRMED_SCORE,
-                        text,
-                    )
+                print(
+                    f"[DIRECT] Confirmed "
+                    f"chapter {expected} "
+                    f"at {actual_url}"
+                )
 
+                break
+
+
+# ============================================================
+# EXPECTED CHAPTER PROBING
+# ============================================================
 
 def probe_expected_chapters(
     base_url,
@@ -1977,12 +2571,25 @@ def probe_expected_chapters(
         )
     ]
 
+    print(
+        f"[PROBE] Expected chapters: "
+        f"{expected}"
+    )
+
+    # --------------------------------------------------------
+    # Current page.
+    # --------------------------------------------------------
+
     probe_current_page_for_expected_range(
         current_soup,
         current_url,
         expected,
         candidates,
     )
+
+    # --------------------------------------------------------
+    # Previous chapter page.
+    # --------------------------------------------------------
 
     probe_previous_chapter_page(
         current_soup,
@@ -1992,139 +2599,26 @@ def probe_expected_chapters(
         candidates,
     )
 
-    misses = 0
+    # --------------------------------------------------------
+    # Direct URL probes.
+    # --------------------------------------------------------
 
-    parsed = urlparse(
-        base_url
+    probe_direct_urls(
+        base_url,
+        old_chapter,
+        expected,
+        candidates,
     )
 
-    origin = (
-        f"{parsed.scheme}://"
-        f"{parsed.netloc}"
+    # --------------------------------------------------------
+    # WordPress search.
+    # --------------------------------------------------------
+
+    probe_wordpress_search(
+        base_url,
+        expected,
+        candidates,
     )
-
-    endpoint = urljoin(
-        origin,
-        "/wp-json/wp/v2/search",
-    )
-
-    for expected_number in expected:
-        response = request_with_retry(
-            endpoint,
-            timeout=API_TIMEOUT,
-            params={
-                "search": str(expected_number),
-                "per_page": 50,
-            },
-        )
-
-        found = False
-
-        if response is not None:
-            try:
-                results = response.json()
-
-            except Exception:
-                results = []
-
-            if isinstance(
-                results,
-                list,
-            ):
-                for result in results:
-                    exact, evidence = (
-                        wp_result_is_exact_chapter(
-                            result,
-                            expected_number,
-                        )
-                    )
-
-                    if not exact:
-                        continue
-
-                    target = clean_text(
-                        result.get(
-                            "url",
-                            "",
-                        )
-                    )
-
-                    if not target:
-                        continue
-
-                    if not is_valid_chapter_url(
-                        target,
-                        base_url,
-                    ):
-                        continue
-
-                    add_candidate(
-                        candidates,
-                        expected_number,
-                        target,
-                        "WORDPRESS_EXACT",
-                        EXPECTED_CHAPTER_SEARCH_SCORE,
-                        evidence,
-                    )
-
-                    found = True
-
-                    body, final_url = download_page(
-                        target
-                    )
-
-                    if body:
-                        actual_url = (
-                            final_url
-                            or target
-                        )
-
-                        soup = BeautifulSoup(
-                            body,
-                            "html.parser",
-                        )
-
-                        for element in soup.find_all(
-                            [
-                                "title",
-                                "h1",
-                                "h2",
-                                "h3",
-                            ]
-                        ):
-                            text = clean_text(
-                                element.get_text(
-                                    " ",
-                                    strip=True,
-                                )
-                            )
-
-                            if text_confirms_chapter(
-                                text,
-                                expected_number,
-                            ):
-                                add_candidate(
-                                    candidates,
-                                    expected_number,
-                                    actual_url,
-                                    "WORDPRESS_PAGE_EXACT",
-                                    EXPECTED_CHAPTER_CONFIRMED_SCORE,
-                                    text,
-                                )
-
-                    break
-
-        if found:
-            misses = 0
-
-        else:
-            misses += 1
-
-            if (
-                misses
-                >= EXPECTED_PROBE_MAX_MISSES
-            ):
-                break
 
 
 # ============================================================
@@ -2166,11 +2660,22 @@ def rank_candidates(
                 "DIRECT_CURRENT_PAGE",
                 "DIRECT_CURRENT_URL",
                 "DIRECT_PREVIOUS_PAGE",
+                "DIRECT_PREVIOUS_NEXT",
+                "DIRECT_NAVIGATION",
+                "DIRECT_URL_PROBE",
             }
             else 0
         )
 
+        confirmed = (
+            1
+            if candidate.score
+            >= EXPECTED_CHAPTER_CONFIRMED_SCORE
+            else 0
+        )
+
         return (
+            confirmed,
             direct,
             exact,
             candidate.score,
@@ -2213,7 +2718,7 @@ def detect_latest_chapter(
     )
 
     visited.add(
-        strip_monitor_parameter(
+        normalize_url(
             current_url
         )
     )
@@ -2222,6 +2727,15 @@ def detect_latest_chapter(
         body,
         "html.parser",
     )
+
+    print(
+        f"[DETECT] Current page: "
+        f"{current_url}"
+    )
+
+    # --------------------------------------------------------
+    # Main page inspection.
+    # --------------------------------------------------------
 
     extract_from_links(
         soup,
@@ -2247,6 +2761,10 @@ def detect_latest_chapter(
         candidates,
     )
 
+    # --------------------------------------------------------
+    # Expected chapter probes.
+    # --------------------------------------------------------
+
     probe_expected_chapters(
         page_url,
         soup,
@@ -2255,9 +2773,18 @@ def detect_latest_chapter(
         candidates,
     )
 
+    # --------------------------------------------------------
+    # Related pages.
+    # --------------------------------------------------------
+
     related_pages = discover_related_pages(
         soup,
         current_url,
+    )
+
+    print(
+        f"[DISCOVERY] Related pages found: "
+        f"{len(related_pages)}"
     )
 
     for related_url in related_pages:
@@ -2268,7 +2795,7 @@ def detect_latest_chapter(
             break
 
         clean_related_url = (
-            strip_monitor_parameter(
+            normalize_url(
                 related_url
             )
         )
@@ -2280,6 +2807,11 @@ def detect_latest_chapter(
             clean_related_url
         )
 
+        print(
+            f"[DISCOVERY] Checking: "
+            f"{clean_related_url}"
+        )
+
         related_soup = (
             inspect_discovered_pages(
                 clean_related_url,
@@ -2287,24 +2819,75 @@ def detect_latest_chapter(
             )
         )
 
-        if related_soup is not None:
-            extract_from_links(
+        if related_soup is None:
+            continue
+
+        expected_numbers = {
+            old_chapter + i
+            for i in range(
+                1,
+                EXPECTED_PROBE_AHEAD + 1,
+            )
+        }
+
+        extract_from_links(
+            related_soup,
+            clean_related_url,
+            candidates,
+            expected_numbers=expected_numbers,
+        )
+
+        # Follow next/previous from discovered page.
+        next_links, previous_links = (
+            extract_navigation_links(
                 related_soup,
                 clean_related_url,
-                candidates,
-                expected_numbers={
-                    old_chapter + i
-                    for i in range(
-                        1,
-                        EXPECTED_PROBE_AHEAD + 1,
-                    )
-                },
             )
+        )
+
+        for navigation_url in (
+            next_links[:2]
+            + previous_links[:2]
+        ):
+            clean_navigation_url = (
+                normalize_url(
+                    navigation_url
+                )
+            )
+
+            if (
+                clean_navigation_url
+                in visited
+            ):
+                continue
+
+            if (
+                len(visited)
+                >= MAX_DISCOVERY_PAGES
+            ):
+                break
+
+            visited.add(
+                clean_navigation_url
+            )
+
+            inspect_discovered_pages(
+                clean_navigation_url,
+                candidates,
+            )
+
+    # --------------------------------------------------------
+    # API / sitemap.
+    # --------------------------------------------------------
 
     probe_api_and_sitemap(
         page_url,
         candidates,
     )
+
+    # --------------------------------------------------------
+    # Ranking.
+    # --------------------------------------------------------
 
     ranked = rank_candidates(
         candidates,
@@ -2317,7 +2900,12 @@ def detect_latest_chapter(
     )
 
     if ranked:
-        for candidate in ranked[:15]:
+        print(
+            f"[DETECT] Future candidates: "
+            f"{len(ranked)}"
+        )
+
+        for candidate in ranked[:20]:
             print(
                 f"[CANDIDATE] "
                 f"{candidate.number} | "
@@ -2327,10 +2915,53 @@ def detect_latest_chapter(
                 f"{candidate.evidence}"
             )
 
-        return (
-            ranked[0].number,
-            ranked,
+        # ----------------------------------------------------
+        # Final safety check:
+        #
+        # We prefer candidates that have strong confirmation.
+        # ----------------------------------------------------
+
+        strongest = ranked[0]
+
+        if (
+            strongest.score
+            >= EXPECTED_CHAPTER_CONFIRMED_SCORE
+        ):
+            print(
+                f"[DETECT] Confirmed latest "
+                f"candidate: "
+                f"{strongest.number}"
+            )
+
+            return (
+                strongest.number,
+                ranked,
+            )
+
+        # A lower score candidate is still allowed if it
+        # came from a highly reliable exact WordPress result.
+        if strongest.source in {
+            "WORDPRESS_EXACT",
+            "WORDPRESS_PAGE_EXACT",
+        }:
+            print(
+                f"[DETECT] Confirmed via "
+                f"WordPress exact result: "
+                f"{strongest.number}"
+            )
+
+            return (
+                strongest.number,
+                ranked,
+            )
+
+        print(
+            "[DETECT] Future candidates "
+            "were found, but none reached "
+            "the required confirmation level."
         )
+
+        return None, ranked
 
     print(
         "[DETECT] No chapter newer than "
@@ -2570,8 +3201,6 @@ def monitor_work(
 
 def monitor_all_users(data):
     changed = False
-
-    # data.json الحالي يستخدم users كـ Dictionary.
 
     users = (
         data.get(
