@@ -1000,6 +1000,41 @@ async function handleCallback(
   } =
     await loadData(env);
 
+  const isAdminUser =
+    isAdmin(chatId);
+
+  // ==================================================
+  // MAINTENANCE GUARD
+  // ==================================================
+  // يمنع المستخدمين العاديين من استخدام
+  // أزرار قديمة أثناء الصيانة.
+  //
+  // الأدمن يظل قادرًا على استخدام البوت.
+  // ==================================================
+
+  if (
+    isMaintenance(data) &&
+    !isAdminUser
+  ) {
+
+    await answerCallback(
+      env,
+      callback.id,
+      "🔧 البوت في وضع الصيانة حاليًا."
+    );
+
+    await sendMessage(
+      env,
+      chatId,
+      "🔧 <b>البوت في وضع الصيانة حاليًا.</b>\n\n" +
+      "يرجى المحاولة مرة أخرى لاحقًا.",
+      null,
+      data
+    );
+
+    return;
+  }
+
   ensureUser(
     data,
     chatId
@@ -1454,6 +1489,50 @@ async function handleCallback(
     data.settings.maintenance =
       action === "maintenance_on";
 
+    // ------------------------------------------------
+    // نحفظ حالة الصيانة أولًا.
+    // هذا يضمن أن monitor.py سيرى الحالة
+    // الصحيحة حتى لو حدثت مشكلة بعد ذلك.
+    // ------------------------------------------------
+
+    try {
+
+      await saveData(
+        env,
+        data,
+        sha
+      );
+
+    } catch (error) {
+
+      console.error(
+        "MAINTENANCE SAVE ERROR:",
+        error
+      );
+
+      await answerCallback(
+        env,
+        callback.id,
+        "فشل حفظ حالة الصيانة."
+      );
+
+      await sendMessage(
+
+        env,
+
+        chatId,
+
+        "❌ <b>تعذر تغيير وضع الصيانة.</b>\n\n" +
+
+        "لم يتم اعتماد التغيير لأن حفظ البيانات في GitHub فشل.",
+
+        null,
+        null
+      );
+
+      return;
+    }
+
     await answerCallback(
       env,
       callback.id
@@ -1492,12 +1571,6 @@ async function handleCallback(
         "عاد البوت للعمل للمستخدمين."
       );
     }
-
-    await saveData(
-      env,
-      data,
-      sha
-    );
 
     return;
   }
