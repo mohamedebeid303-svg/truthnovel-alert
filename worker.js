@@ -4,6 +4,7 @@ const DATA_FILE = "data.json";
 const ADMIN_CHAT_ID = "805162451";
 
 const ACTIVE_TIME = 15 * 60 * 1000;
+const SAVE_MAX_RETRIES = 3;
 
 
 // ======================================================
@@ -257,64 +258,115 @@ async function saveData(
   sha
 ) {
 
-  const url =
-    `https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`;
+  let currentData =
+    data;
 
-  const json =
-    JSON.stringify(
-      data,
-      null,
-      2
-    );
+  let currentSha =
+    sha;
 
-  const encoded =
-    btoa(
-      unescape(
-        encodeURIComponent(json)
-      )
-    );
+  for (
+    let attempt = 1;
+    attempt <= SAVE_MAX_RETRIES;
+    attempt++
+  ) {
 
-  const response =
-    await fetch(
-      url,
-      {
-        method: "PUT",
+    const url =
+      `https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`;
 
-        headers: {
+    const json =
+      JSON.stringify(
+        currentData,
+        null,
+        2
+      );
 
-          "Authorization":
-            `Bearer ${env.GITHUB_TOKEN}`,
+    const encoded =
+      btoa(
+        unescape(
+          encodeURIComponent(json)
+        )
+      );
 
-          "Accept":
-            "application/vnd.github+json",
+    const response =
+      await fetch(
+        url,
+        {
+          method: "PUT",
 
-          "Content-Type":
-            "application/json",
+          headers: {
 
-          "X-GitHub-Api-Version":
-            "2022-11-28",
+            "Authorization":
+              `Bearer ${env.GITHUB_TOKEN}`,
 
-          "User-Agent":
-            "Sandrone-Bot"
-        },
+            "Accept":
+              "application/vnd.github+json",
 
-        body: JSON.stringify({
+            "Content-Type":
+              "application/json",
 
-          message:
-            "Update Sandrone bot data",
+            "X-GitHub-Api-Version":
+              "2022-11-28",
 
-          content:
-            encoded,
+            "User-Agent":
+              "Sandrone-Bot"
+          },
 
-          sha
-        })
-      }
-    );
+          body: JSON.stringify({
 
-  if (!response.ok) {
+            message:
+              "Update Sandrone bot data",
+
+            content:
+              encoded,
+
+            sha:
+              currentSha
+          })
+        }
+      );
+
+    if (response.ok) {
+
+      return await response.json();
+    }
 
     const errorText =
       await response.text();
+
+    if (response.status === 409) {
+
+      console.warn(
+        `GitHub SAVE CONFLICT (attempt ${attempt}/${SAVE_MAX_RETRIES}). Reloading latest data...`
+      );
+
+      if (
+        attempt === SAVE_MAX_RETRIES
+      ) {
+
+        console.error(
+          "GitHub SAVE CONFLICT: retries exhausted.",
+          errorText
+        );
+
+        throw new Error(
+          "GitHub SAVE ERROR: 409 after retries"
+        );
+      }
+
+      const latest =
+        await loadData(env);
+
+      currentData =
+        mergeWorkerChanges(
+          latest.data,
+          currentData
+        );
+
+      currentSha =
+        latest.sha;
+
+      continue;
+    }
 
     console.error(
       "GitHub SAVE ERROR:",
@@ -327,7 +379,259 @@ async function saveData(
     );
   }
 
-  return await response.json();
+  throw new Error(
+    "GitHub SAVE ERROR: retries exhausted"
+  );
+}
+
+
+// ======================================================
+// MERGE AFTER GITHUB CONFLICT
+// ======================================================
+
+function mergeWorkerChanges(
+  latestData,
+  localData
+) {
+
+  const merged =
+    latestData;
+
+  if (
+    !merged.users ||
+    typeof merged.users !== "object"
+  ) {
+
+    merged.users = {};
+  }
+
+  if (
+    !localData.users ||
+    typeof localData.users !== "object"
+  ) {
+
+    return merged;
+  }
+
+  for (
+    const userId of
+    Object.keys(localData.users)
+  ) {
+
+    const localUser =
+      localData.users[userId];
+
+    if (!localUser) {
+      continue;
+    }
+
+    if (
+      !merged.users[userId]
+    ) {
+
+      merged.users[userId] =
+        localUser;
+
+      continue;
+    }
+
+    const latestUser =
+      merged.users[userId];
+
+    if (
+      !latestUser ||
+      typeof latestUser !== "object"
+    ) {
+
+      merged.users[userId] =
+        localUser;
+
+      continue;
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        localUser,
+        "state"
+      )
+    ) {
+
+      latestUser.state =
+        localUser.state;
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        localUser,
+        "last_active"
+      )
+    ) {
+
+      latestUser.last_active =
+        Math.max(
+          Number(latestUser.last_active || 0),
+          Number(localUser.last_active || 0)
+        );
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        localUser,
+        "first_seen"
+      ) &&
+      !Object.prototype.hasOwnProperty.call(
+        latestUser,
+        "first_seen"
+      )
+    ) {
+
+      latestUser.first_seen =
+        localUser.first_seen;
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        localUser,
+        "last_bot_message_id"
+      )
+    ) {
+
+      latestUser.last_bot_message_id =
+        localUser.last_bot_message_id;
+    }
+
+    if (
+      Array.isArray(localUser.works)
+    ) {
+
+      if (
+        !Array.isArray(latestUser.works)
+      ) {
+
+        latestUser.works =
+          localUser.works;
+
+      } else {
+
+        mergeUserWorks(
+          latestUser.works,
+          localUser.works
+        );
+      }
+    }
+  }
+
+  if (
+    localData.settings &&
+    typeof localData.settings === "object"
+  ) {
+
+    if (
+      typeof localData.settings.maintenance ===
+      "boolean"
+    ) {
+
+      merged.settings =
+        merged.settings || {};
+
+      merged.settings.maintenance =
+        localData.settings.maintenance;
+    }
+  }
+
+  return merged;
+}
+
+
+// ======================================================
+// MERGE USER WORKS
+// ======================================================
+
+function mergeUserWorks(
+  latestWorks,
+  localWorks
+) {
+
+  for (
+    const localWork of localWorks
+  ) {
+
+    if (
+      !localWork ||
+      typeof localWork !== "object"
+    ) {
+
+      continue;
+    }
+
+    const localUrl =
+      String(
+        localWork.url || ""
+      ).trim();
+
+    const localName =
+      String(
+        localWork.name || ""
+      ).trim();
+
+    let match =
+      null;
+
+    if (localUrl) {
+
+      match =
+        latestWorks.find(
+          work =>
+            work &&
+            String(
+              work.url || ""
+            ).trim() === localUrl
+        );
+    }
+
+    if (!match && localName) {
+
+      match =
+        latestWorks.find(
+          work =>
+            work &&
+            String(
+              work.name || ""
+            ).trim() === localName
+        );
+    }
+
+    if (!match) {
+
+      latestWorks.push(
+        localWork
+      );
+
+      continue;
+    }
+
+    const localChapter =
+      Number(
+        localWork.last_chapter
+      );
+
+    const latestChapter =
+      Number(
+        match.last_chapter
+      );
+
+    if (
+      Number.isFinite(localChapter) &&
+      (
+        !Number.isFinite(latestChapter) ||
+        localChapter > latestChapter
+      )
+    ) {
+
+      match.last_chapter =
+        localWork.last_chapter;
+    }
+  }
 }
 
 
@@ -794,19 +1098,12 @@ async function startCommand(
   );
 
   await sendMessage(
-
     env,
-
     message.chat.id,
-
     "👋 <b>مرحبًا، معك Sandrone</b>\n\n" +
-
     "سأساعدك في مراقبة أعمالك وإعلامك عند صدور فصل جديد.\n\n" +
-
     "اختر أحد الخيارات من القائمة:",
-
     mainKeyboard(),
-
     data
   );
 
@@ -849,17 +1146,11 @@ async function addCommand(
   );
 
   await sendMessage(
-
     env,
-
     message.chat.id,
-
     "➕ <b>إضافة عمل جديد</b>\n\n" +
-
     "اختر نوع العمل:",
-
     workTypeKeyboard(),
-
     data
   );
 
@@ -895,17 +1186,11 @@ async function listCommand(
   ) {
 
     await sendMessage(
-
       env,
-
       message.chat.id,
-
       "📚 لا توجد أعمال مضافة إلى قائمتك حاليًا.\n\n" +
-
       "اضغط ➕ إضافة عمل لإضافة أول عمل.",
-
       null,
-
       data
     );
 
@@ -930,17 +1215,12 @@ async function listCommand(
         work.type || "رواية";
 
       text +=
-
         `${index + 1}. <b>${escapeHtml(work.name)}</b>\n` +
-
         `🏷️ النوع: ${escapeHtml(type)}\n` +
-
         `🔢 آخر فصل: ${work.last_chapter}\n` +
-
         `🔗 ${escapeHtml(work.url)}\n\n`;
 
       keyboard.push([
-
         {
           text:
             `🗑️ حذف ${work.name}`,
@@ -948,21 +1228,15 @@ async function listCommand(
           callback_data:
             `remove_${index}`
         }
-
       ]);
     }
   );
 
   await sendMessage(
-
     env,
-
     message.chat.id,
-
     text,
-
     keyboard,
-
     data
   );
 
@@ -1003,13 +1277,9 @@ async function handleCallback(
   const isAdminUser =
     isAdmin(chatId);
 
+
   // ==================================================
   // MAINTENANCE GUARD
-  // ==================================================
-  // يمنع المستخدمين العاديين من استخدام
-  // أزرار قديمة أثناء الصيانة.
-  //
-  // الأدمن يظل قادرًا على استخدام البوت.
   // ==================================================
 
   if (
@@ -1064,17 +1334,11 @@ async function handleCallback(
     };
 
     await sendMessage(
-
       env,
-
       chatId,
-
       "➕ <b>إضافة عمل جديد</b>\n\n" +
-
       "اختر نوع العمل:",
-
       workTypeKeyboard(),
-
       data
     );
 
@@ -1093,15 +1357,10 @@ async function handleCallback(
   // ==================================================
 
   if (
-
     action === "type_novel" ||
-
     action === "type_manga" ||
-
     action === "type_manhwa" ||
-
     action === "type_manhua"
-
   ) {
 
     const types = {
@@ -1137,26 +1396,17 @@ async function handleCallback(
     };
 
     await answerCallback(
-
       env,
-
       callback.id,
-
       `تم اختيار: ${selectedType}`
     );
 
     await sendMessage(
-
       env,
-
       chatId,
-
       `🏷️ <b>نوع العمل:</b> ${escapeHtml(selectedType)}\n\n` +
-
       `✏️ الآن أرسل اسم ${escapeHtml(typeName)}.`,
-
       null,
-
       data
     );
 
@@ -1182,13 +1432,9 @@ async function handleCallback(
     );
 
     await listCommand(
-
       callback.message,
-
       env,
-
       data,
-
       sha
     );
 
@@ -1213,21 +1459,14 @@ async function handleCallback(
       data.users[chatId];
 
     if (
-
       !user ||
-
       !user.works ||
-
       !user.works[index]
-
     ) {
 
       await answerCallback(
-
         env,
-
         callback.id,
-
         "العمل غير موجود."
       );
 
@@ -1249,21 +1488,13 @@ async function handleCallback(
     );
 
     await sendMessage(
-
       env,
-
       chatId,
-
       `⚠️ هل أنت متأكد من حذف ${escapeHtml(typeName)}:\n\n` +
-
       `<b>${escapeHtml(work.name)}</b>\n\n` +
-
       `سيتم إزالته من قائمتك فقط.`,
-
       [
-
         [
-
           {
             text:
               "✅ نعم، احذف",
@@ -1279,11 +1510,8 @@ async function handleCallback(
             callback_data:
               "cancel_remove"
           }
-
         ]
-
       ],
-
       data
     );
 
@@ -1316,21 +1544,14 @@ async function handleCallback(
       data.users[chatId];
 
     if (
-
       !user ||
-
       !user.works ||
-
       !user.works[index]
-
     ) {
 
       await answerCallback(
-
         env,
-
         callback.id,
-
         "العمل غير موجود."
       );
 
@@ -1350,26 +1571,17 @@ async function handleCallback(
       getTypeName(type);
 
     await answerCallback(
-
       env,
-
       callback.id,
-
       "تم الحذف."
     );
 
     await sendMessage(
-
       env,
-
       chatId,
-
       `🗑️ تم حذف ${escapeHtml(typeName)} ` +
-
       `<b>${escapeHtml(removed.name)}</b> من قائمتك.`,
-
       null,
-
       data
     );
 
@@ -1392,24 +1604,16 @@ async function handleCallback(
   ) {
 
     await answerCallback(
-
       env,
-
       callback.id,
-
       "تم الإلغاء."
     );
 
     await sendMessage(
-
       env,
-
       chatId,
-
       "❌ تم إلغاء عملية الحذف.",
-
       null,
-
       data
     );
 
@@ -1434,11 +1638,8 @@ async function handleCallback(
     if (!isAdmin(chatId)) {
 
       await answerCallback(
-
         env,
-
         callback.id,
-
         "غير مصرح."
       );
 
@@ -1465,21 +1666,15 @@ async function handleCallback(
   // ==================================================
 
   if (
-
     action === "maintenance_on" ||
-
     action === "maintenance_off"
-
   ) {
 
     if (!isAdmin(chatId)) {
 
       await answerCallback(
-
         env,
-
         callback.id,
-
         "غير مصرح."
       );
 
@@ -1488,12 +1683,6 @@ async function handleCallback(
 
     data.settings.maintenance =
       action === "maintenance_on";
-
-    // ------------------------------------------------
-    // نحفظ حالة الصيانة أولًا.
-    // هذا يضمن أن monitor.py سيرى الحالة
-    // الصحيحة حتى لو حدثت مشكلة بعد ذلك.
-    // ------------------------------------------------
 
     try {
 
@@ -1517,15 +1706,10 @@ async function handleCallback(
       );
 
       await sendMessage(
-
         env,
-
         chatId,
-
         "❌ <b>تعذر تغيير وضع الصيانة.</b>\n\n" +
-
         "لم يتم اعتماد التغيير لأن حفظ البيانات في GitHub فشل.",
-
         null,
         null
       );
@@ -1548,26 +1732,18 @@ async function handleCallback(
       );
 
       await sendMessage(
-
         env,
-
         chatId,
-
         "🔴 <b>تم تفعيل وضع الصيانة.</b>\n\n" +
-
         "المستخدمون العاديون لن يتمكنوا من استخدام البوت حتى إيقاف الصيانة."
       );
 
     } else {
 
       await sendMessage(
-
         env,
-
         chatId,
-
         "🟢 <b>تم إيقاف وضع الصيانة.</b>\n\n" +
-
         "عاد البوت للعمل للمستخدمين."
       );
     }
@@ -1587,11 +1763,8 @@ async function handleCallback(
     if (!isAdmin(chatId)) {
 
       await answerCallback(
-
         env,
-
         callback.id,
-
         "غير مصرح."
       );
 
@@ -1624,11 +1797,8 @@ async function handleCallback(
     if (!isAdmin(chatId)) {
 
       await answerCallback(
-
         env,
-
         callback.id,
-
         "غير مصرح."
       );
 
@@ -1647,17 +1817,11 @@ async function handleCallback(
     );
 
     await sendMessage(
-
       env,
-
       chatId,
-
       "📢 <b>إرسال رسالة جماعية</b>\n\n" +
-
       "اكتب الآن الرسالة التي تريد إرسالها لجميع مستخدمي البوت.\n\n" +
-
       "❌ للإلغاء أرسل /cancel",
-
       null
     );
 
@@ -1711,13 +1875,9 @@ async function handleMessage(
   ) {
 
     await startCommand(
-
       message,
-
       env,
-
       data,
-
       sha
     );
 
@@ -1736,15 +1896,10 @@ async function handleMessage(
     if (!isAdminUser) {
 
       await sendMessage(
-
         env,
-
         chatId,
-
         "⛔ هذا الأمر متاح للمبرمج فقط.",
-
         null,
-
         data
       );
 
@@ -1758,11 +1913,8 @@ async function handleMessage(
     }
 
     await adminPanel(
-
       chatId,
-
       env,
-
       data
     );
 
@@ -1792,11 +1944,8 @@ async function handleMessage(
         null;
 
       await sendMessage(
-
         env,
-
         chatId,
-
         "❌ تم إلغاء الرسالة الجماعية."
       );
 
@@ -1825,13 +1974,9 @@ async function handleMessage(
     if (!text) {
 
       await sendMessage(
-
         env,
-
         chatId,
-
         "❌ أرسل نص الرسالة الجماعية.\n\n" +
-
         "أو أرسل /cancel للإلغاء."
       );
 
@@ -1854,11 +1999,8 @@ async function handleMessage(
     );
 
     await sendMessage(
-
       env,
-
       chatId,
-
       "✅ <b>تم إرسال الرسالة الجماعية.</b>"
     );
 
@@ -1871,25 +2013,16 @@ async function handleMessage(
   // ==================================================
 
   if (
-
     isMaintenance(data) &&
-
     !isAdminUser
-
   ) {
 
     await sendMessage(
-
       env,
-
       chatId,
-
       "🔧 <b>البوت في وضع الصيانة حاليًا.</b>\n\n" +
-
       "يرجى المحاولة مرة أخرى لاحقًا.",
-
       null,
-
       data
     );
 
@@ -1933,13 +2066,9 @@ async function handleMessage(
   ) {
 
     await addCommand(
-
       message,
-
       env,
-
       data,
-
       sha
     );
 
@@ -1956,13 +2085,9 @@ async function handleMessage(
   ) {
 
     await listCommand(
-
       message,
-
       env,
-
       data,
-
       sha
     );
 
@@ -1983,15 +2108,10 @@ async function handleMessage(
   ) {
 
     await sendMessage(
-
       env,
-
       chatId,
-
       "اختر أمرًا من القائمة 👇",
-
       mainKeyboard(),
-
       data
     );
 
@@ -2015,15 +2135,10 @@ async function handleMessage(
   ) {
 
     await sendMessage(
-
       env,
-
       chatId,
-
       "🏷️ <b>اختر نوع العمل أولًا:</b>",
-
       workTypeKeyboard(),
-
       data
     );
 
@@ -2055,15 +2170,10 @@ async function handleMessage(
     if (!text) {
 
       await sendMessage(
-
         env,
-
         chatId,
-
         `❌ أرسل اسم ${escapeHtml(typeName)}.`,
-
         null,
-
         data
       );
 
@@ -2088,15 +2198,10 @@ async function handleMessage(
     };
 
     await sendMessage(
-
       env,
-
       chatId,
-
       `🔗 الآن أرسل رابط صفحة ${escapeHtml(typeName)}.`,
-
       null,
-
       data
     );
 
@@ -2133,17 +2238,11 @@ async function handleMessage(
     ) {
 
       await sendMessage(
-
         env,
-
         chatId,
-
         `❌ الرابط غير صحيح.\n\n` +
-
         `أرسل رابط صفحة ${escapeHtml(typeName)} يبدأ بـ <b>http://</b> أو <b>https://</b>.`,
-
         null,
-
         data
       );
 
@@ -2160,30 +2259,21 @@ async function handleMessage(
 
       const response =
         await fetch(
-
           url,
-
           {
             method:
               "GET"
           }
-
         );
 
       if (!response.ok) {
 
         await sendMessage(
-
           env,
-
           chatId,
-
           `⚠️ تمكنت من الوصول إلى الرابط لكن الموقع أعاد حالة غير طبيعية.\n\n` +
-
           `إذا كنت متأكدًا من الرابط، أرسل رابط صفحة ${escapeHtml(typeName)} مرة أخرى.`,
-
           null,
-
           data
         );
 
@@ -2199,17 +2289,11 @@ async function handleMessage(
     } catch {
 
       await sendMessage(
-
         env,
-
         chatId,
-
         `⚠️ لم أتمكن من الوصول إلى رابط ${escapeHtml(typeName)}.\n\n` +
-
         "تأكد من أن الرابط صحيح ويمكن فتحه.",
-
         null,
-
         data
       );
 
@@ -2236,19 +2320,12 @@ async function handleMessage(
     };
 
     await sendMessage(
-
       env,
-
       chatId,
-
       `🔢 ممتاز.\n\n` +
-
       `أرسل رقم آخر فصل صدر من ${escapeHtml(typeName)} حاليًا.\n\n` +
-
       "مثال: <b>125</b>",
-
       null,
-
       data
     );
 
@@ -2284,25 +2361,16 @@ async function handleMessage(
       Number(normalizedText);
 
     if (
-
       !Number.isInteger(chapter) ||
-
       chapter < 0
-
     ) {
 
       await sendMessage(
-
         env,
-
         chatId,
-
         `❌ أرسل رقم فصل صحيح لـ ${escapeHtml(typeName)}.\n\n` +
-
         "مثال: <b>125</b>",
-
         null,
-
         data
       );
 
@@ -2336,21 +2404,13 @@ async function handleMessage(
       null;
 
     await sendMessage(
-
       env,
-
       chatId,
-
       `✅ <b>تمت إضافة ${escapeHtml(typeName)} بنجاح!</b>\n\n` +
-
       `📖 ${escapeHtml(workName)}\n` +
-
       `🔢 آخر فصل: ${chapter}\n\n` +
-
       `سيحتفظ Sandrone بهذه ${escapeHtml(typeName)} ضمن قائمتك.`,
-
       null,
-
       data
     );
 
@@ -2450,23 +2510,18 @@ async function adminPanel(
       }
 
       if (
-
         now -
         (user.last_active || 0)
         <=
         ACTIVE_TIME
-
       ) {
 
         activeUsers++;
       }
 
       totalWorks +=
-
         Array.isArray(user.works)
-
           ? user.works.length
-
           : 0;
     }
   );
@@ -2480,29 +2535,18 @@ async function adminPanel(
       : "🟢 يعمل";
 
   const text =
-
     "🛠️ <b>لوحة تحكم Sandrone</b>\n\n" +
-
     `🤖 حالة البوت: <b>${botStatus}</b>\n\n` +
-
     `👥 إجمالي المشتركين: <b>${users.length}</b>\n` +
-
     `🟢 المستخدمون النشطون: <b>${activeUsers}</b>\n` +
-
     `📚 إجمالي الأعمال المراقبة: <b>${totalWorks}</b>`;
 
   await sendMessage(
-
     env,
-
     chatId,
-
     text,
-
     [
-
       [
-
         {
           text:
             "📚 جميع الأعمال",
@@ -2510,11 +2554,9 @@ async function adminPanel(
           callback_data:
             "admin_works"
         }
-
       ],
 
       [
-
         {
           text:
             "📢 رسالة جماعية",
@@ -2522,31 +2564,21 @@ async function adminPanel(
           callback_data:
             "admin_broadcast"
         }
-
       ],
 
       [
-
         {
           text:
-
             maintenance
-
               ? "🟢 إيقاف الصيانة"
-
               : "🔴 تفعيل الصيانة",
 
           callback_data:
-
             maintenance
-
               ? "maintenance_off"
-
               : "maintenance_on"
         }
-
       ]
-
     ]
   );
 }
@@ -2579,11 +2611,8 @@ async function showAllWorks(
       data.users[userId];
 
     if (
-
       !user ||
-
       !Array.isArray(user.works)
-
     ) {
 
       continue;
@@ -2600,17 +2629,11 @@ async function showAllWorks(
         work.type || "رواية";
 
       text +=
-
         `👤 <b>المستخدم:</b> ${escapeHtml(userId)}\n` +
-
         `📖 <b>الاسم:</b> ${escapeHtml(work.name)}\n` +
-
         `🏷️ <b>النوع:</b> ${escapeHtml(type)}\n` +
-
         `🔢 <b>آخر فصل:</b> ${work.last_chapter}\n` +
-
         `🔗 <b>الرابط:</b> ${escapeHtml(work.url)}\n\n` +
-
         "━━━━━━━━━━━━━━\n\n";
     }
   }
@@ -2644,11 +2667,8 @@ async function broadcastMaintenance(
 ) {
 
   const message =
-
     "🔧 <b>تنبيه صيانة Sandrone</b>\n\n" +
-
     "تم تفعيل وضع الصيانة في Sandrone.\n\n" +
-
     "لن تتمكن من استخدام البوت مؤقتًا حتى انتهاء الصيانة.";
 
   for (
@@ -2669,22 +2689,16 @@ async function broadcastMaintenance(
     try {
 
       await sendMessage(
-
         env,
-
         userId,
-
         message
       );
 
     } catch (error) {
 
       console.error(
-
         "Broadcast error:",
-
         userId,
-
         error
       );
     }
@@ -2727,11 +2741,8 @@ async function sendBroadcastMessage(
 
       const result =
         await sendMessage(
-
           env,
-
           userId,
-
           message
         );
 
@@ -2752,11 +2763,8 @@ async function sendBroadcastMessage(
       failed++;
 
       console.error(
-
         "Broadcast message error:",
-
         userId,
-
         error
       );
     }
