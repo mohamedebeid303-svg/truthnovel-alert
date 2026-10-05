@@ -1700,6 +1700,11 @@ async function handleCallback(
 
     } else {
 
+      await broadcastMaintenanceOff(
+        env,
+        data
+      );
+
       await sendMessage(
         env,
         chatId,
@@ -2658,6 +2663,53 @@ async function broadcastMaintenance(
 
       console.error(
         "Broadcast error:",
+        userId,
+        error
+      );
+    }
+  }
+}
+
+
+// ======================================================
+// MAINTENANCE OFF BROADCAST
+// ======================================================
+
+async function broadcastMaintenanceOff(
+  env,
+  data
+) {
+
+  const message =
+    "🟢 <b>عاد Sandrone للعمل</b>";
+
+  for (
+    const userId of
+    Object.keys(
+      data.users || {}
+    )
+  ) {
+
+    if (
+      String(userId) ===
+      String(ADMIN_CHAT_ID)
+    ) {
+
+      continue;
+    }
+
+    try {
+
+      await sendMessage(
+        env,
+        userId,
+        message
+      );
+
+    } catch (error) {
+
+      console.error(
+        "Maintenance off broadcast error:",
         userId,
         error
       );
