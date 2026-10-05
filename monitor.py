@@ -634,10 +634,21 @@ def load_data():
     return data, sha
 
 
-def save_data(
+# ============================================================
+# GITHUB SAVE
+# ============================================================
+
+def github_save_data(
     data,
     sha,
 ):
+    """
+    الحفظ الأساسي إلى GitHub.
+
+    إذا حدث 409 يتم تحويله إلى خطأ خاص
+    حتى تتمكن save_data_with_retry()
+    من إعادة تحميل أحدث نسخة ودمج التغييرات.
+    """
 
     url = (
         f"https://api.github.com/repos/"
@@ -667,19 +678,495 @@ def save_data(
         timeout=REQUEST_TIMEOUT,
     )
 
-    if response.status_code not in (
+    if response.status_code in (
         200,
         201,
     ):
 
-        raise RuntimeError(
-            f"GitHub save failed: "
-            f"HTTP {response.status_code}: "
-            f"{response.text[:500]}"
+        print(
+            "[GITHUB] data.json saved successfully."
         )
 
-    print(
-        "[GITHUB] data.json saved successfully."
+        return response.json()
+
+    if response.status_code == 409:
+
+        raise RuntimeError(
+            "GITHUB_SHA_CONFLICT"
+        )
+
+    raise RuntimeError(
+        f"GitHub save failed: "
+        f"HTTP {response.status_code}: "
+        f"{response.text[:500]}"
+    )
+
+
+# ============================================================
+# MONITOR DATA MERGE
+# ============================================================
+
+def clone_data(data):
+    """
+    نسخة مستقلة من data للمقارنة.
+    """
+
+    return json.loads(
+        json.dumps(
+            data,
+            ensure_ascii=False,
+        )
+    )
+
+
+def work_identity(work):
+    """
+    تحديد هوية العمل حتى نستطيع دمج
+    last_chapter دون استبدال بقية بيانات Worker.
+
+    الرابط هو الهوية الأساسية.
+
+    إذا لم يوجد رابط، نستخدم النوع + الاسم.
+    """
+
+    if not isinstance(
+        work,
+        dict,
+    ):
+        return None
+
+    url = str(
+        work.get(
+            "url",
+            "",
+        )
+    ).strip()
+
+    if url:
+
+        return (
+            "url",
+            normalize_url(url),
+        )
+
+    name = str(
+        work.get(
+            "name",
+            work.get(
+                "title",
+                "",
+            ),
+        )
+    ).strip()
+
+    work_type = str(
+        work.get(
+            "type",
+            "",
+        )
+    ).strip()
+
+    if name:
+
+        return (
+            "fallback",
+            work_type,
+            name,
+        )
+
+    return None
+
+
+def build_monitor_updates(
+    original_data,
+    monitored_data,
+):
+    """
+    يستخرج فقط تغييرات last_chapter
+    التي حدثت أثناء تشغيل monitor.py.
+
+    لا يتم استخراج أو دمج:
+        users
+        state
+        settings
+        last_active
+        last_bot_message_id
+        أو أي حقل آخر.
+    """
+
+    updates = {}
+
+    original_users = (
+        original_data.get(
+            "users",
+            {},
+        )
+        if isinstance(
+            original_data.get(
+                "users",
+                {},
+            ),
+            dict,
+        )
+        else {}
+    )
+
+    monitored_users = (
+        monitored_data.get(
+            "users",
+            {},
+        )
+        if isinstance(
+            monitored_data.get(
+                "users",
+                {},
+            ),
+            dict,
+        )
+        else {}
+    )
+
+    for user_id, monitored_user in (
+        monitored_users.items()
+    ):
+
+        if not isinstance(
+            monitored_user,
+            dict,
+        ):
+            continue
+
+        monitored_works = (
+            monitored_user.get(
+                "works",
+                [],
+            )
+        )
+
+        if not isinstance(
+            monitored_works,
+            list,
+        ):
+            continue
+
+        original_user = (
+            original_users.get(
+                user_id,
+                {},
+            )
+        )
+
+        if not isinstance(
+            original_user,
+            dict,
+        ):
+            original_user = {}
+
+        original_works = (
+            original_user.get(
+                "works",
+                [],
+            )
+        )
+
+        if not isinstance(
+            original_works,
+            list,
+        ):
+            original_works = []
+
+        original_by_identity = {}
+
+        for original_work in original_works:
+
+            identity = work_identity(
+                original_work
+            )
+
+            if identity is not None:
+
+                original_by_identity[
+                    identity
+                ] = original_work
+
+        for monitored_work in monitored_works:
+
+            if not isinstance(
+                monitored_work,
+                dict,
+            ):
+                continue
+
+            identity = work_identity(
+                monitored_work
+            )
+
+            if identity is None:
+                continue
+
+            original_work = (
+                original_by_identity.get(
+                    identity
+                )
+            )
+
+            if not isinstance(
+                original_work,
+                dict,
+            ):
+                continue
+
+            old_chapter = (
+                original_work.get(
+                    "last_chapter"
+                )
+            )
+
+            new_chapter = (
+                monitored_work.get(
+                    "last_chapter"
+                )
+            )
+
+            if new_chapter == old_chapter:
+                continue
+
+            if user_id not in updates:
+
+                updates[user_id] = {}
+
+            updates[user_id][
+                identity
+            ] = new_chapter
+
+    return updates
+
+
+def merge_monitor_updates(
+    latest_data,
+    updates,
+):
+    """
+    يدمج فقط تغييرات monitor.py
+    داخل أحدث نسخة من GitHub.
+
+    لا يعيد إنشاء مستخدم أو عمل حُذف
+    أثناء تشغيل المراقب.
+
+    لا يلمس settings أو state أو أي
+    حقل آخر.
+    """
+
+    users = latest_data.get(
+        "users",
+        {},
+    )
+
+    if not isinstance(
+        users,
+        dict,
+    ):
+
+        return latest_data
+
+    for user_id, work_updates in (
+        updates.items()
+    ):
+
+        latest_user = users.get(
+            user_id
+        )
+
+        if not isinstance(
+            latest_user,
+            dict,
+        ):
+            continue
+
+        latest_works = (
+            latest_user.get(
+                "works",
+                [],
+            )
+        )
+
+        if not isinstance(
+            latest_works,
+            list,
+        ):
+            continue
+
+        for latest_work in latest_works:
+
+            if not isinstance(
+                latest_work,
+                dict,
+            ):
+                continue
+
+            identity = work_identity(
+                latest_work
+            )
+
+            if identity is None:
+                continue
+
+            if identity not in work_updates:
+                continue
+
+            new_chapter = (
+                work_updates[
+                    identity
+                ]
+            )
+
+            current_chapter = (
+                latest_work.get(
+                    "last_chapter"
+                )
+            )
+
+            # إذا كانت النسخة الحالية في GitHub
+            # أحدث من القيمة التي اكتشفها المراقب،
+            # لا نرجع بها إلى الخلف.
+            try:
+
+                if (
+                    current_chapter is not None
+                    and new_chapter is not None
+                    and float(current_chapter)
+                    > float(new_chapter)
+                ):
+
+                    print(
+                        "[MERGE] Keeping newer "
+                        f"last_chapter={current_chapter} "
+                        f"in GitHub for user {user_id}."
+                    )
+
+                    continue
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+                pass
+
+            latest_work[
+                "last_chapter"
+            ] = new_chapter
+
+            print(
+                "[MERGE] Updated "
+                f"user={user_id} "
+                f"last_chapter={new_chapter}"
+            )
+
+    return latest_data
+
+
+def save_data_with_retry(
+    data,
+    original_data,
+    sha,
+    max_attempts=3,
+):
+    """
+    يحفظ بيانات monitor.py مع معالجة
+    SHA conflicts.
+
+    المسار الطبيعي:
+        PUT باستخدام SHA الحالي.
+
+    عند 409:
+        1. تحميل أحدث data.json.
+        2. استخراج تغييرات last_chapter فقط.
+        3. دمجها في أحدث نسخة.
+        4. إعادة الحفظ باستخدام SHA الجديد.
+
+    بهذه الطريقة لا يتم استبدال تغييرات Worker.
+    """
+
+    updates = build_monitor_updates(
+        original_data,
+        data,
+    )
+
+    if not updates:
+
+        print(
+            "[GITHUB] No monitor-specific "
+            "updates to merge."
+        )
+
+    current_data = data
+    current_sha = sha
+
+    for attempt in range(
+        1,
+        max_attempts + 1,
+    ):
+
+        try:
+
+            github_save_data(
+                current_data,
+                current_sha,
+            )
+
+            print(
+                "[GITHUB] Save successful "
+                f"on attempt {attempt}."
+            )
+
+            return current_data
+
+        except RuntimeError as error:
+
+            if str(error) != (
+                "GITHUB_SHA_CONFLICT"
+            ):
+
+                raise
+
+            print(
+                "[GITHUB] SHA conflict detected "
+                f"on attempt {attempt}/"
+                f"{max_attempts}."
+            )
+
+            if attempt >= max_attempts:
+
+                raise RuntimeError(
+                    "GitHub save failed after "
+                    "multiple SHA conflict retries."
+                )
+
+            print(
+                "[GITHUB] Loading latest "
+                "data.json for safe merge..."
+            )
+
+            latest_data, latest_sha = (
+                load_data()
+            )
+
+            current_data = (
+                merge_monitor_updates(
+                    latest_data,
+                    updates,
+                )
+            )
+
+            current_sha = latest_sha
+
+            print(
+                "[GITHUB] Latest data loaded. "
+                "Retrying save..."
+            )
+
+    raise RuntimeError(
+        "GitHub save retry failed."
     )
 
 
@@ -715,6 +1202,57 @@ def is_maintenance_enabled(data):
             False,
         )
     )
+
+
+def maintenance_still_enabled():
+    """
+    يعيد فحص وضع الصيانة من أحدث نسخة
+    موجودة على GitHub.
+
+    يستخدم قبل إرسال إشعار جديد حتى إذا
+    تم تفعيل الصيانة أثناء تشغيل monitor.py،
+    لا يستمر المراقب في إرسال إشعارات.
+
+    عند فشل قراءة GitHub نرجع True احتياطيًا،
+    أي نتوقف عن الإرسال بدل المخاطرة بإرسال
+    إشعار أثناء الصيانة.
+    """
+
+    try:
+
+        latest_data, _ = load_data()
+
+        if is_maintenance_enabled(
+            latest_data
+        ):
+
+            print(
+                "[MAINTENANCE] Maintenance "
+                "was enabled during this run."
+            )
+
+            print(
+                "[MAINTENANCE] "
+                "Stopping notifications."
+            )
+
+            return True
+
+        return False
+
+    except Exception as exc:
+
+        print(
+            "[MAINTENANCE] Unable to verify "
+            f"current maintenance state: {exc}"
+        )
+
+        print(
+            "[MAINTENANCE] "
+            "Fail-safe: stopping notification."
+        )
+
+        return True
 
 
 # ============================================================
@@ -2737,6 +3275,20 @@ def monitor_work(
 
             break
 
+        # ----------------------------------------------------
+        # فحص الصيانة قبل الإرسال
+        # ----------------------------------------------------
+
+        if maintenance_still_enabled():
+
+            print(
+                "[STOP] Maintenance mode "
+                "is active. "
+                "No notification will be sent."
+            )
+
+            break
+
         print(
             f"[NEW] Confirmed chapter "
             f"{chapter_number}: "
@@ -2813,6 +3365,19 @@ def main():
         )
 
     data, sha = load_data()
+
+    # ========================================================
+    # IMPORTANT:
+    # حفظ نسخة أصلية مستقلة قبل أن يبدأ
+    # monitor.py في تغيير last_chapter.
+    #
+    # نحتاج هذه النسخة فقط في حالة حدوث
+    # SHA conflict أثناء الحفظ.
+    # ========================================================
+
+    original_data = clone_data(
+        data
+    )
 
     # ========================================================
     # MAINTENANCE MODE
@@ -2947,10 +3512,25 @@ def main():
 
     if changed:
 
-        save_data(
-            data,
-            sha,
-        )
+        try:
+
+            save_data_with_retry(
+                data,
+                original_data,
+                sha,
+            )
+
+        except Exception as exc:
+
+            print(
+                "[GITHUB] FINAL SAVE ERROR:"
+            )
+
+            print(
+                f"[GITHUB] {exc}"
+            )
+
+            raise
 
         print(
             "[DONE] Database changes saved."
