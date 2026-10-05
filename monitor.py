@@ -122,7 +122,6 @@ def normalize_url(url):
     url = url.strip()
 
     parsed = urlparse(url)
-
     parsed = parsed._replace(fragment="")
 
     return parsed.geturl()
@@ -231,9 +230,7 @@ def extract_number_from_url(url):
         return None
 
     url = normalize_digits(url)
-
     parsed = urlparse(url)
-
     path = parsed.path or ""
 
     for pattern in URL_PATTERNS:
@@ -292,10 +289,7 @@ def extract_number_from_title(text):
         if match:
 
             try:
-
-                number = int(
-                    match.group(1)
-                )
+                number = int(match.group(1))
 
                 if 1 <= number <= 10_000_000:
                     return number
@@ -341,10 +335,7 @@ def extract_explicit_chapter_number(text):
         if match:
 
             try:
-
-                number = int(
-                    match.group(1)
-                )
+                number = int(match.group(1))
 
                 if 1 <= number <= 10_000_000:
                     return number
@@ -535,7 +526,6 @@ def detect_protection_page(
     ).lower()
 
     marker_hits = 0
-
     matched = []
 
     for marker in PROTECTION_MARKERS:
@@ -690,6 +680,40 @@ def save_data(
 
     print(
         "[GITHUB] data.json saved successfully."
+    )
+
+
+# ============================================================
+# MAINTENANCE MODE
+# ============================================================
+
+def is_maintenance_enabled(data):
+    """
+    التحقق من وضع الصيانة.
+
+    إذا كان:
+        settings.maintenance = true
+
+    يتوقف monitor.py بالكامل قبل فحص أي رواية
+    أو إرسال أي إشعار أو تعديل last_chapter.
+    """
+
+    settings = data.get(
+        "settings"
+    )
+
+    if not isinstance(
+        settings,
+        dict,
+    ):
+
+        return False
+
+    return bool(
+        settings.get(
+            "maintenance",
+            False,
+        )
     )
 
 
@@ -892,7 +916,6 @@ def verify_chapter_page(
     url = normalize_url(url)
 
     if not url:
-
         return None
 
     cache_key = (
@@ -907,7 +930,6 @@ def verify_chapter_page(
         ]
 
         return cached
-
 
     # --------------------------------------------------------
     # فتح الصفحة
@@ -957,7 +979,6 @@ def verify_chapter_page(
 
         return None
 
-
     soup = BeautifulSoup(
         html,
         "html.parser",
@@ -986,7 +1007,6 @@ def verify_chapter_page(
             url
         )
     )
-
 
     # --------------------------------------------------------
     # Log أساسي
@@ -1026,7 +1046,6 @@ def verify_chapter_page(
         f"{url_number}"
     )
 
-
     # --------------------------------------------------------
     # Protection detection
     # --------------------------------------------------------
@@ -1065,13 +1084,11 @@ def verify_chapter_page(
 
         return None
 
-
     # --------------------------------------------------------
     # استخراج الأدلة القوية
     # --------------------------------------------------------
 
     evidence_candidates = []
-
 
     # TITLE
     title_number = (
@@ -1089,7 +1106,6 @@ def verify_chapter_page(
                 title,
             )
         )
-
 
     # H1
     for h1 in h1_texts:
@@ -1118,7 +1134,6 @@ def verify_chapter_page(
                 )
             )
 
-
     # H2/H3
     for heading in h2_h3_texts:
 
@@ -1145,7 +1160,6 @@ def verify_chapter_page(
                     heading,
                 )
             )
-
 
     # Breadcrumb
     for breadcrumb in breadcrumb_texts:
@@ -1174,7 +1188,6 @@ def verify_chapter_page(
                 )
             )
 
-
     # --------------------------------------------------------
     # عرض الأدلة
     # --------------------------------------------------------
@@ -1198,7 +1211,6 @@ def verify_chapter_page(
             "No explicit chapter number "
             "found in title/H1/headings/breadcrumb."
         )
-
 
     # --------------------------------------------------------
     # إذا كان لدينا expected_number
@@ -1264,7 +1276,6 @@ def verify_chapter_page(
 
             return result
 
-
         # ----------------------------------------------------
         # مهم:
         # URL وحده لا يكفي.
@@ -1294,7 +1305,6 @@ def verify_chapter_page(
         ] = None
 
         return None
-
 
     # --------------------------------------------------------
     # لا يوجد expected_number
@@ -1335,7 +1345,6 @@ def verify_chapter_page(
         ] = result
 
         return result
-
 
     print(
         "[VERIFY] RESULT: REJECTED"
@@ -1443,7 +1452,6 @@ def analyze_links(
             continue
 
         score = 0
-
         evidence = []
 
         if number_from_text is not None:
@@ -1605,7 +1613,6 @@ def crawl_chapter_pages(
     ]
 
     visited = set()
-
     verified = {}
 
     while (
@@ -1706,7 +1713,6 @@ def crawl_chapter_pages(
                     queue.append(
                         candidate.url
                     )
-
 
         # ----------------------------------------------------
         # السابق / التالي
@@ -1941,7 +1947,6 @@ def wordpress_candidates(
                 )
             )
 
-
     # --------------------------------------------------------
     # WordPress search
     # --------------------------------------------------------
@@ -2013,7 +2018,6 @@ def wordpress_candidates(
                     link,
                 )
             )
-
 
     verified = {}
 
@@ -2238,7 +2242,6 @@ def sitemap_candidates(
     )
 
     visited = set()
-
     verified = {}
 
     while (
@@ -2386,7 +2389,6 @@ def discover_verified_chapters(
                     number
                 ] = candidate
 
-
     # --------------------------------------------------------
     # 1. Main page
     # --------------------------------------------------------
@@ -2405,7 +2407,6 @@ def discover_verified_chapters(
     merge(
         crawl_results
     )
-
 
     # --------------------------------------------------------
     # 2. WordPress
@@ -2431,7 +2432,6 @@ def discover_verified_chapters(
             f"[WORDPRESS] Error: {exc}"
         )
 
-
     # --------------------------------------------------------
     # 3. RSS
     # --------------------------------------------------------
@@ -2455,7 +2455,6 @@ def discover_verified_chapters(
             f"[RSS] Error: {exc}"
         )
 
-
     # --------------------------------------------------------
     # 4. Sitemap
     # --------------------------------------------------------
@@ -2478,7 +2477,6 @@ def discover_verified_chapters(
         print(
             f"[SITEMAP] Error: {exc}"
         )
-
 
     return all_verified
 
@@ -2656,14 +2654,12 @@ def monitor_work(
         f"stored={stored} | {url}"
     )
 
-
     verified = (
         discover_verified_chapters(
             url,
             stored,
         )
     )
-
 
     if not verified:
 
@@ -2674,7 +2670,6 @@ def monitor_work(
 
         return False
 
-
     print(
         "[DETECT] Verified chapters: "
         + ", ".join(
@@ -2684,7 +2679,6 @@ def monitor_work(
             )
         )
     )
-
 
     # --------------------------------------------------------
     # أهم خطوة:
@@ -2703,7 +2697,6 @@ def monitor_work(
         f"{latest_contiguous}"
     )
 
-
     if (
         latest_contiguous
         <= stored
@@ -2717,9 +2710,7 @@ def monitor_work(
 
         return False
 
-
     changed = False
-
 
     # --------------------------------------------------------
     # إرسال كل فصل بالترتيب
@@ -2746,13 +2737,11 @@ def monitor_work(
 
             break
 
-
         print(
             f"[NEW] Confirmed chapter "
             f"{chapter_number}: "
             f"{candidate.url}"
         )
-
 
         message = chapter_message(
             name,
@@ -2760,14 +2749,12 @@ def monitor_work(
             candidate.url,
         )
 
-
         success = (
             send_telegram_message(
                 chat_id,
                 message,
             )
         )
-
 
         if not success:
 
@@ -2779,7 +2766,6 @@ def monitor_work(
             )
 
             break
-
 
         # لا نغير الحالة إلا بعد
         # نجاح Telegram
@@ -2795,11 +2781,9 @@ def monitor_work(
             f"{chapter_number}"
         )
 
-
         time.sleep(
             0.5
         )
-
 
     return changed
 
@@ -2814,14 +2798,12 @@ def main():
         "[START] Chapter monitor started."
     )
 
-
     if not TELEGRAM_BOT_TOKEN:
 
         raise RuntimeError(
             "TELEGRAM_BOT_TOKEN "
             "is not configured."
         )
-
 
     if not GITHUB_TOKEN:
 
@@ -2830,13 +2812,48 @@ def main():
             "is not configured."
         )
 
-
     data, sha = load_data()
+
+    # ========================================================
+    # MAINTENANCE MODE
+    # ========================================================
+    # إذا كانت الصيانة مفعلة في data.json:
+    #
+    # - لا نفحص أي رواية
+    # - لا نزحف لأي موقع
+    # - لا نرسل أي إشعار
+    # - لا نغير last_chapter
+    # - لا نحفظ data.json
+    #
+    # ونخرج من التشغيل مباشرة.
+    # ========================================================
+
+    if is_maintenance_enabled(
+        data
+    ):
+
+        print(
+            "[MAINTENANCE] "
+            "Maintenance mode is enabled."
+        )
+
+        print(
+            "[MAINTENANCE] "
+            "Monitoring and chapter "
+            "notifications are paused."
+        )
+
+        print(
+            "[DONE] "
+            "No database changes "
+            "were required."
+        )
+
+        return
 
     users = get_users(
         data
     )
-
 
     if isinstance(
         users,
@@ -2844,7 +2861,6 @@ def main():
     ):
 
         iterable = users.items()
-
 
     elif isinstance(
         users,
@@ -2880,7 +2896,6 @@ def main():
                     )
                 )
 
-
     else:
 
         print(
@@ -2890,9 +2905,7 @@ def main():
 
         return
 
-
     changed = False
-
 
     for chat_id, user in iterable:
 
@@ -2909,7 +2922,6 @@ def main():
             f"{len(works)} work(s)"
         )
 
-
         for work in works:
 
             try:
@@ -2925,7 +2937,6 @@ def main():
 
                     changed = True
 
-
             except Exception as exc:
 
                 print(
@@ -2933,7 +2944,6 @@ def main():
                     f"failed for user "
                     f"{chat_id}: {exc}"
                 )
-
 
     if changed:
 
