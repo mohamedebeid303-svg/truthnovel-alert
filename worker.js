@@ -452,17 +452,6 @@ function mergeWorkerChanges(
     if (
       Object.prototype.hasOwnProperty.call(
         localUser,
-        "state"
-      )
-    ) {
-
-      latestUser.state =
-        localUser.state;
-    }
-
-    if (
-      Object.prototype.hasOwnProperty.call(
-        localUser,
         "last_active"
       )
     ) {
@@ -490,17 +479,6 @@ function mergeWorkerChanges(
     }
 
     if (
-      Object.prototype.hasOwnProperty.call(
-        localUser,
-        "last_bot_message_id"
-      )
-    ) {
-
-      latestUser.last_bot_message_id =
-        localUser.last_bot_message_id;
-    }
-
-    if (
       Array.isArray(localUser.works)
     ) {
 
@@ -518,24 +496,6 @@ function mergeWorkerChanges(
           localUser.works
         );
       }
-    }
-  }
-
-  if (
-    localData.settings &&
-    typeof localData.settings === "object"
-  ) {
-
-    if (
-      typeof localData.settings.maintenance ===
-      "boolean"
-    ) {
-
-      merged.settings =
-        merged.settings || {};
-
-      merged.settings.maintenance =
-        localData.settings.maintenance;
     }
   }
 
