@@ -2222,56 +2222,80 @@ if (
   return;  
 }  
 
-try {  
 
-  const response =  
-    await fetch(  
-      url,  
-      {  
-        method:  
-          "GET"  
-      }  
-    );  
+try {
+  const response = await fetch(url, {
+    method: "GET",
+    redirect: "follow",
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+      "Accept":
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language":
+        "zh-CN,zh;q=0.9,en;q=0.8"
+    }
+  });
 
-  if (!response.ok) {  
+  const contentType =
+    response.headers.get("content-type") || "";
 
-    await sendMessage(  
-      env,  
-      chatId,  
-      `⚠️ تمكنت من الوصول إلى الرابط لكن الموقع أعاد حالة غير طبيعية.\n\n` +  
-      `إذا كنت متأكدًا من الرابط، أرسل رابط صفحة ${escapeHtml(typeName)} مرة أخرى.`,  
-      null,  
-      data  
-    );  
+  console.log("URL VALIDATION:", {
+    requestedUrl: url,
+    finalUrl: response.url,
+    status: response.status,
+    contentType
+  });
 
-    await saveData(  
-      env,  
-      data,  
-      sha  
-    );  
+  if (!response.ok) {
+    await sendMessage(
+      env,
+      chatId,
+      `⚠️ تعذر التحقق من صفحة العمل.\n\n` +
+      `رمز استجابة الموقع: ${response.status}\n\n` +
+      (
+        response.status === 403
+          ? "قد يكون الموقع قد رفض الطلب بسبب الحماية أو صلاحيات الوصول."
+          : response.status === 429
+            ? "الموقع يحد من عدد الطلبات. حاول لاحقًا."
+            : response.status === 404
+              ? "الصفحة غير موجودة. تحقق من الرابط."
+              : "تحقق من سجلات الاتصال وحاول لاحقًا."
+      ),
+      null,
+      data
+    );
 
-    return;  
-  }  
+    await saveData(env, data, sha);
+    return;
+  }
 
-} catch {  
+  if (
+    contentType &&
+    !contentType.includes("text/html") &&
+    !contentType.includes("application/xhtml+xml")
+  ) {
+    console.warn("Unexpected content type:", contentType);
+  }
 
-  await sendMessage(  
-    env,  
-    chatId,  
-    `⚠️ لم أتمكن من الوصول إلى رابط ${escapeHtml(typeName)}.\n\n` +  
-    "تأكد من أن الرابط صحيح ويمكن فتحه.",  
-    null,  
-    data  
-  );  
+} catch (error) {
+  console.error("URL FETCH ERROR:", {
+    url,
+    message: String(error)
+  });
 
-  await saveData(  
-    env,  
-    data,  
-    sha  
-  );  
+  await sendMessage(
+    env,
+    chatId,
+    "⚠️ تعذر الاتصال بصفحة العمل. " +
+    "تحقق من الرابط أو حاول مرة أخرى لاحقًا.",
+    null,
+    data
+  );
 
-  return;  
-}  
+  await saveData(env, data, sha);
+  return;
+}
 
 user.state = {  
 
