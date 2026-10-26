@@ -1,5 +1,4 @@
-<!doctype html>
-<html lang="ar"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sandrone Worker - الكود المصحح</title><style>body{font-family:system-ui,sans-serif;margin:0;padding:20px;background:#f5f5f5;color:#222}main{max-width:1000px;margin:auto}h1{font-size:1.4rem}p{line-height:1.7}pre{white-space:pre;overflow:auto;direction:ltr;text-align:left;background:#171717;color:#eee;padding:18px;border-radius:10px;font-size:13px;line-height:1.5}a,button{display:inline-block;padding:10px 14px;margin:5px 5px 12px 0;border-radius:8px;border:0;background:#1769aa;color:white;text-decoration:none;cursor:pointer;font-size:14px}.hint{color:#555}</style></head><body><main><h1>كود Sandrone Worker المصحح</h1><p>يمكنك فتح هذه الصفحة في المتصفح ونسخ الكود أو تنزيل ملف JavaScript مباشرةً.</p><a href="worker_fixed.js" download="worker_fixed.js">تنزيل ملف worker_fixed.js</a><button onclick="navigator.clipboard.writeText(document.getElementById('code').innerText).then(()=>alert('تم نسخ الكود'))">نسخ الكود</button><p class="hint">إذا لم يعمل النسخ من المتصفح، نزّل ملف JavaScript من الرابط أعلاه.</p><pre id="code">const GITHUB_REPO = "mohamedebeid303-svg/truthnovel-alert";
+const GITHUB_REPO = "mohamedebeid303-svg/truthnovel-alert";
 const DATA_FILE = "data.json";
 const ADMIN_CHAT_ID = "805162451";
 const ACTIVE_TIME = 15 * 60 * 1000;
@@ -69,7 +68,7 @@ async function loadData(env) {
   const result = await response.json();
   const decoded = atob(result.content.replace(/\n/g, ""));
   const jsonText = new TextDecoder().decode(
-    Uint8Array.from(decoded, c =&gt; c.charCodeAt(0))
+    Uint8Array.from(decoded, c => c.charCodeAt(0))
   );
   let data;
   try { data = JSON.parse(jsonText); } catch { data = {}; }
@@ -82,7 +81,7 @@ async function loadData(env) {
 async function saveData(env, data, sha) {
   let currentData = data;
   let currentSha = sha;
-  for (let attempt = 1; attempt &lt;= SAVE_MAX_RETRIES; attempt++) {
+  for (let attempt = 1; attempt <= SAVE_MAX_RETRIES; attempt++) {
     const url = `https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`;
     const json = JSON.stringify(currentData, null, 2);
     const encoded = btoa(unescape(encodeURIComponent(json)));
@@ -129,7 +128,7 @@ function mergeWorkerChanges(latestData, localData) {
     if (Object.prototype.hasOwnProperty.call(localUser, "last_active")) {
       latestUser.last_active = Math.max(Number(latestUser.last_active || 0), Number(localUser.last_active || 0));
     }
-    if (Object.prototype.hasOwnProperty.call(localUser, "first_seen") &amp;&amp; !Object.prototype.hasOwnProperty.call(latestUser, "first_seen")) {
+    if (Object.prototype.hasOwnProperty.call(localUser, "first_seen") && !Object.prototype.hasOwnProperty.call(latestUser, "first_seen")) {
       latestUser.first_seen = localUser.first_seen;
     }
     if (Array.isArray(localUser.works)) {
@@ -139,7 +138,7 @@ function mergeWorkerChanges(latestData, localData) {
     if (Object.prototype.hasOwnProperty.call(localUser, "state")) latestUser.state = localUser.state;
     if (Object.prototype.hasOwnProperty.call(localUser, "last_bot_message_id")) latestUser.last_bot_message_id = localUser.last_bot_message_id;
   }
-  if (localData.settings &amp;&amp; typeof localData.settings === "object") {
+  if (localData.settings && typeof localData.settings === "object") {
     merged.settings = { ...(merged.settings || {}), ...localData.settings };
   }
   return merged;
@@ -150,12 +149,12 @@ function mergeUserWorks(latestWorks, localWorks) {
     if (!localWork || typeof localWork !== "object") continue;
     const localUrl = String(localWork.url || "").trim();
     const localName = String(localWork.name || "").trim();
-    let match = localUrl ? latestWorks.find(work =&gt; work &amp;&amp; String(work.url || "").trim() === localUrl) : null;
-    if (!match &amp;&amp; localName) match = latestWorks.find(work =&gt; work &amp;&amp; String(work.name || "").trim() === localName);
+    let match = localUrl ? latestWorks.find(work => work && String(work.url || "").trim() === localUrl) : null;
+    if (!match && localName) match = latestWorks.find(work => work && String(work.name || "").trim() === localName);
     if (!match) { latestWorks.push(localWork); continue; }
     const localChapter = Number(localWork.last_chapter);
     const latestChapter = Number(match.last_chapter);
-    if (Number.isFinite(localChapter) &amp;&amp; (!Number.isFinite(latestChapter) || localChapter &gt; latestChapter)) {
+    if (Number.isFinite(localChapter) && (!Number.isFinite(latestChapter) || localChapter > latestChapter)) {
       match.last_chapter = localWork.last_chapter;
     }
   }
@@ -193,7 +192,7 @@ async function sendMessage(env, chatId, text, keyboard = null, data = null) {
   }
   let result;
   try { result = await response.json(); } catch { return null; }
-  if (isNormalMessage &amp;&amp; result?.ok &amp;&amp; result.result?.message_id) {
+  if (isNormalMessage && result?.ok && result.result?.message_id) {
     const user = data.users[String(chatId)];
     if (user) user.last_bot_message_id = result.result.message_id;
   }
@@ -218,7 +217,7 @@ function ensureUser(data, userId) {
 }
 function updateActivity(data, userId) { if (!data.users[userId]) ensureUser(data, userId); data.users[userId].last_active = Date.now(); }
 function isAdmin(chatId) { return String(chatId) === String(ADMIN_CHAT_ID); }
-function isMaintenance(data) { return Boolean(data.settings &amp;&amp; data.settings.maintenance); }
+function isMaintenance(data) { return Boolean(data.settings && data.settings.maintenance); }
 function getTypeName(type) {
   return ({ "رواية": "الرواية", "مانجا": "المانجا", "مانهوا": "المانهوا", "مانها": "المانها" })[type] || type;
 }
@@ -236,7 +235,7 @@ async function startCommand(message, env, data, sha) {
   const userId = String(message.chat.id);
   ensureUser(data, userId); updateActivity(data, userId);
   await sendMessage(env, message.chat.id,
-    "👋 &lt;b&gt;مرحبًا، معك Sandrone&lt;/b&gt;\n\nسأساعدك في مراقبة أعمالك وإعلامك عند صدور فصل جديد.\n\nاختر أحد الخيارات من القائمة:",
+    "👋 <b>مرحبًا، معك Sandrone</b>\n\nسأساعدك في مراقبة أعمالك وإعلامك عند صدور فصل جديد.\n\nاختر أحد الخيارات من القائمة:",
     mainKeyboard(), data);
   await saveData(env, data, sha);
 }
@@ -245,7 +244,7 @@ async function addCommand(message, env, data, sha) {
   ensureUser(data, userId);
   data.users[userId].state = { step: "waiting_type" };
   updateActivity(data, userId);
-  await sendMessage(env, message.chat.id, "➕ &lt;b&gt;إضافة عمل جديد&lt;/b&gt;\n\nاختر نوع العمل:", workTypeKeyboard(), data);
+  await sendMessage(env, message.chat.id, "➕ <b>إضافة عمل جديد</b>\n\nاختر نوع العمل:", workTypeKeyboard(), data);
   await saveData(env, data, sha);
 }
 async function listCommand(message, env, data, sha) {
@@ -254,11 +253,11 @@ async function listCommand(message, env, data, sha) {
     await sendMessage(env, message.chat.id, "📚 لا توجد أعمال مضافة إلى قائمتك حاليًا.\n\nاضغط ➕ إضافة عمل لإضافة أول عمل.", null, data);
     await saveData(env, data, sha); return;
   }
-  let text = "📚 &lt;b&gt;أعمالك المراقبة:&lt;/b&gt;\n\n";
+  let text = "📚 <b>أعمالك المراقبة:</b>\n\n";
   const keyboard = [];
-  user.works.forEach((work, index) =&gt; {
+  user.works.forEach((work, index) => {
     const type = work.type || "رواية";
-    text += `${index + 1}. &lt;b&gt;${escapeHtml(work.name)}&lt;/b&gt;\n🏷️ النوع: ${escapeHtml(type)}\n🔢 آخر فصل: ${work.last_chapter}\n🔗 ${escapeHtml(work.url)}\n\n`;
+    text += `${index + 1}. <b>${escapeHtml(work.name)}</b>\n🏷️ النوع: ${escapeHtml(type)}\n🔢 آخر فصل: ${work.last_chapter}\n🔗 ${escapeHtml(work.url)}\n\n`;
     keyboard.push([{ text: `🗑️ حذف ${String(work.name).slice(0, 50)}`, callback_data: `remove_${index}` }]);
   });
   await sendMessage(env, message.chat.id, text, keyboard, data);
@@ -271,16 +270,16 @@ async function handleCallback(update, env) {
   const action = callback.data;
   const { data, sha } = await loadData(env);
   const isAdminUser = isAdmin(chatId);
-  if (isMaintenance(data) &amp;&amp; !isAdminUser) {
+  if (isMaintenance(data) && !isAdminUser) {
     await answerCallback(env, callback.id, "🔧 البوت في وضع الصيانة حاليًا.");
-    await sendMessage(env, chatId, "🔧 &lt;b&gt;البوت في وضع الصيانة حاليًا.&lt;/b&gt;\n\nيرجى المحاولة مرة أخرى لاحقًا.", null, data);
+    await sendMessage(env, chatId, "🔧 <b>البوت في وضع الصيانة حاليًا.</b>\n\nيرجى المحاولة مرة أخرى لاحقًا.", null, data);
     await saveData(env, data, sha); return;
   }
   ensureUser(data, chatId); updateActivity(data, chatId);
   if (action === "add") {
     await answerCallback(env, callback.id);
     data.users[chatId].state = { step: "waiting_type" };
-    await sendMessage(env, chatId, "➕ &lt;b&gt;إضافة عمل جديد&lt;/b&gt;\n\nاختر نوع العمل:", workTypeKeyboard(), data);
+    await sendMessage(env, chatId, "➕ <b>إضافة عمل جديد</b>\n\nاختر نوع العمل:", workTypeKeyboard(), data);
     await saveData(env, data, sha); return;
   }
   const types = { type_novel: "رواية", type_manga: "مانجا", type_manhwa: "مانهوا", type_manhua: "مانها" };
@@ -288,7 +287,7 @@ async function handleCallback(update, env) {
     const selectedType = types[action];
     data.users[chatId].state = { step: "waiting_name", type: selectedType };
     await answerCallback(env, callback.id, `تم اختيار: ${selectedType}`);
-    await sendMessage(env, chatId, `🏷️ &lt;b&gt;نوع العمل:&lt;/b&gt; ${escapeHtml(selectedType)}\n\n✏️ الآن أرسل اسم ${escapeHtml(getTypeName(selectedType))}.`, null, data);
+    await sendMessage(env, chatId, `🏷️ <b>نوع العمل:</b> ${escapeHtml(selectedType)}\n\n✏️ الآن أرسل اسم ${escapeHtml(getTypeName(selectedType))}.`, null, data);
     await saveData(env, data, sha); return;
   }
   if (action === "list") {
@@ -300,7 +299,7 @@ async function handleCallback(update, env) {
     const work = user.works[index];
     await answerCallback(env, callback.id);
     await sendMessage(env, chatId,
-      `⚠️ هل أنت متأكد من حذف ${escapeHtml(getTypeName(work.type || "رواية"))}:\n\n&lt;b&gt;${escapeHtml(work.name)}&lt;/b&gt;\n\nسيتم إزالته من قائمتك فقط.`,
+      `⚠️ هل أنت متأكد من حذف ${escapeHtml(getTypeName(work.type || "رواية"))}:\n\n<b>${escapeHtml(work.name)}</b>\n\nسيتم إزالته من قائمتك فقط.`,
       [[{ text: "✅ نعم، احذف", callback_data: `confirm_remove_${index}` }, { text: "❌ إلغاء", callback_data: "cancel_remove" }]], data);
     await saveData(env, data, sha); return;
   }
@@ -309,7 +308,7 @@ async function handleCallback(update, env) {
     if (!user?.works?.[index]) { await answerCallback(env, callback.id, "العمل غير موجود."); return; }
     const removed = user.works.splice(index, 1)[0];
     await answerCallback(env, callback.id, "تم الحذف.");
-    await sendMessage(env, chatId, `🗑️ تم حذف ${escapeHtml(getTypeName(removed.type || "رواية"))} &lt;b&gt;${escapeHtml(removed.name)}&lt;/b&gt; من قائمتك.`, null, data);
+    await sendMessage(env, chatId, `🗑️ تم حذف ${escapeHtml(getTypeName(removed.type || "رواية"))} <b>${escapeHtml(removed.name)}</b> من قائمتك.`, null, data);
     await saveData(env, data, sha); return;
   }
   if (action === "cancel_remove") {
@@ -328,15 +327,15 @@ async function handleCallback(update, env) {
     catch (error) {
       console.error("MAINTENANCE SAVE ERROR:", error);
       await answerCallback(env, callback.id, "فشل حفظ حالة الصيانة.");
-      await sendMessage(env, chatId, "❌ &lt;b&gt;تعذر تغيير وضع الصيانة.&lt;/b&gt;\n\nلم يتم اعتماد التغيير لأن حفظ البيانات في GitHub فشل."); return;
+      await sendMessage(env, chatId, "❌ <b>تعذر تغيير وضع الصيانة.</b>\n\nلم يتم اعتماد التغيير لأن حفظ البيانات في GitHub فشل."); return;
     }
     await answerCallback(env, callback.id);
     if (data.settings.maintenance) {
       await broadcastMaintenance(env, data);
-      await sendMessage(env, chatId, "🔴 &lt;b&gt;تم تفعيل وضع الصيانة.&lt;/b&gt;\n\nالمستخدمون العاديون لن يتمكنوا من استخدام البوت حتى إيقاف الصيانة.");
+      await sendMessage(env, chatId, "🔴 <b>تم تفعيل وضع الصيانة.</b>\n\nالمستخدمون العاديون لن يتمكنوا من استخدام البوت حتى إيقاف الصيانة.");
     } else {
       await broadcastMaintenanceOff(env, data);
-      await sendMessage(env, chatId, "🟢 &lt;b&gt;تم إيقاف وضع الصيانة.&lt;/b&gt;\n\nعاد البوت للعمل للمستخدمين.");
+      await sendMessage(env, chatId, "🟢 <b>تم إيقاف وضع الصيانة.</b>\n\nعاد البوت للعمل للمستخدمين.");
     }
     return;
   }
@@ -348,7 +347,7 @@ async function handleCallback(update, env) {
     if (!isAdminUser) { await answerCallback(env, callback.id, "غير مصرح."); return; }
     data.users[chatId].state = { step: "admin_broadcast" };
     await answerCallback(env, callback.id);
-    await sendMessage(env, chatId, "📢 &lt;b&gt;إرسال رسالة جماعية&lt;/b&gt;\n\nاكتب الآن الرسالة التي تريد إرسالها لجميع مستخدمي البوت.\n\n❌ للإلغاء أرسل /cancel");
+    await sendMessage(env, chatId, "📢 <b>إرسال رسالة جماعية</b>\n\nاكتب الآن الرسالة التي تريد إرسالها لجميع مستخدمي البوت.\n\n❌ للإلغاء أرسل /cancel");
     await saveData(env, data, sha); return;
   }
 }
@@ -367,7 +366,7 @@ async function handleMessage(message, env) {
     }
     await adminPanel(chatId, env, data); return;
   }
-  if (isAdminUser &amp;&amp; text === "/cancel") {
+  if (isAdminUser && text === "/cancel") {
     const adminState = data.users[chatId].state;
     if (adminState?.step === "admin_broadcast") {
       data.users[chatId].state = null;
@@ -375,21 +374,21 @@ async function handleMessage(message, env) {
       await saveData(env, data, sha); return;
     }
   }
-  if (isAdminUser &amp;&amp; data.users[chatId].state?.step === "admin_broadcast") {
+  if (isAdminUser && data.users[chatId].state?.step === "admin_broadcast") {
     if (!text) { await sendMessage(env, chatId, "❌ أرسل نص الرسالة الجماعية.\n\nأو أرسل /cancel للإلغاء."); return; }
     data.users[chatId].state = null;
     await saveData(env, data, sha);
     const result = await sendBroadcastMessage(env, data, text);
-    await sendMessage(env, chatId, `✅ &lt;b&gt;انتهى الإرسال الجماعي.&lt;/b&gt;\n\nتم الإرسال: ${result.sent}\nفشل الإرسال: ${result.failed}`);
+    await sendMessage(env, chatId, `✅ <b>انتهى الإرسال الجماعي.</b>\n\nتم الإرسال: ${result.sent}\nفشل الإرسال: ${result.failed}`);
     return;
   }
-  if (isMaintenance(data) &amp;&amp; !isAdminUser) {
-    await sendMessage(env, chatId, "🔧 &lt;b&gt;البوت في وضع الصيانة حاليًا.&lt;/b&gt;\n\nيرجى المحاولة مرة أخرى لاحقًا.", null, data);
+  if (isMaintenance(data) && !isAdminUser) {
+    await sendMessage(env, chatId, "🔧 <b>البوت في وضع الصيانة حاليًا.</b>\n\nيرجى المحاولة مرة أخرى لاحقًا.", null, data);
     await saveData(env, data, sha); return;
   }
   const now = Date.now();
   const previousActivity = data.users[chatId].last_active || 0;
-  const shouldSaveActivity = now - previousActivity &gt; ACTIVE_TIME;
+  const shouldSaveActivity = now - previousActivity > ACTIVE_TIME;
   updateActivity(data, chatId);
   if (text === "/add") { await addCommand(message, env, data, sha); return; }
   if (text === "/list") { await listCommand(message, env, data, sha); return; }
@@ -399,7 +398,7 @@ async function handleMessage(message, env) {
     await saveData(env, data, sha); return;
   }
   if (user.state.step === "waiting_type") {
-    await sendMessage(env, chatId, "🏷️ &lt;b&gt;اختر نوع العمل أولًا:&lt;/b&gt;", workTypeKeyboard(), data);
+    await sendMessage(env, chatId, "🏷️ <b>اختر نوع العمل أولًا:</b>", workTypeKeyboard(), data);
     await saveData(env, data, sha); return;
   }
   if (user.state.step === "waiting_name") {
@@ -417,7 +416,7 @@ async function handleMessage(message, env) {
     const type = user.state.type;
     const typeName = getTypeName(type);
     if (!/^https?:\/\/\S+$/i.test(url)) {
-      await sendMessage(env, chatId, `❌ الرابط غير صحيح.\n\nأرسل رابط صفحة ${escapeHtml(typeName)} يبدأ بـ &lt;b&gt;http://&lt;/b&gt; أو &lt;b&gt;https://&lt;/b&gt;.`, null, data);
+      await sendMessage(env, chatId, `❌ الرابط غير صحيح.\n\nأرسل رابط صفحة ${escapeHtml(typeName)} يبدأ بـ <b>http://</b> أو <b>https://</b>.`, null, data);
       await saveData(env, data, sha); return;
     }
     try {
@@ -448,7 +447,7 @@ async function handleMessage(message, env) {
         await sendMessage(env, chatId, `⚠️ تعذر التحقق من صفحة العمل.\n\nرمز استجابة الموقع: ${response.status}\n\n${statusMessage}`, null, data);
         await saveData(env, data, sha); return;
       }
-      if (contentType &amp;&amp; !contentType.includes("text/html") &amp;&amp; !contentType.includes("application/xhtml+xml")) {
+      if (contentType && !contentType.includes("text/html") && !contentType.includes("application/xhtml+xml")) {
         console.warn("Unexpected content type:", contentType);
       }
       // تنبيه: استجابة 200 لا تضمن أن الصفحة تحتوي على الفصل؛ قد تكون صفحة تحقق أو حظر.
@@ -458,21 +457,21 @@ async function handleMessage(message, env) {
       await saveData(env, data, sha); return;
     }
     user.state = { step: "waiting_chapter", type, name: user.state.name, url };
-    await sendMessage(env, chatId, `🔢 ممتاز.\n\nأرسل رقم آخر فصل صدر من ${escapeHtml(typeName)} حاليًا.\n\nمثال: &lt;b&gt;125&lt;/b&gt;`, null, data);
+    await sendMessage(env, chatId, `🔢 ممتاز.\n\nأرسل رقم آخر فصل صدر من ${escapeHtml(typeName)} حاليًا.\n\nمثال: <b>125</b>`, null, data);
     await saveData(env, data, sha); return;
   }
   if (user.state.step === "waiting_chapter") {
     const type = user.state.type;
     const typeName = getTypeName(type);
     const chapter = Number(normalizeDigits(text));
-    if (!Number.isInteger(chapter) || chapter &lt; 0) {
-      await sendMessage(env, chatId, `❌ أرسل رقم فصل صحيح لـ ${escapeHtml(typeName)}.\n\nمثال: &lt;b&gt;125&lt;/b&gt;`, null, data);
+    if (!Number.isInteger(chapter) || chapter < 0) {
+      await sendMessage(env, chatId, `❌ أرسل رقم فصل صحيح لـ ${escapeHtml(typeName)}.\n\nمثال: <b>125</b>`, null, data);
       await saveData(env, data, sha); return;
     }
     user.works.push({ type, name: user.state.name, url: user.state.url, last_chapter: chapter });
     const workName = user.state.name;
     user.state = null;
-    await sendMessage(env, chatId, `✅ &lt;b&gt;تمت إضافة ${escapeHtml(typeName)} بنجاح!&lt;/b&gt;\n\n📖 ${escapeHtml(workName)}\n🔢 آخر فصل: ${chapter}\n\nسيحتفظ Sandrone بهذه ${escapeHtml(typeName)} ضمن قائمتك.`, null, data);
+    await sendMessage(env, chatId, `✅ <b>تمت إضافة ${escapeHtml(typeName)} بنجاح!</b>\n\n📖 ${escapeHtml(workName)}\n🔢 آخر فصل: ${chapter}\n\nسيحتفظ Sandrone بهذه ${escapeHtml(typeName)} ضمن قائمتك.`, null, data);
     await saveData(env, data, sha); return;
   }
   if (shouldSaveActivity) await saveData(env, data, sha);
@@ -480,8 +479,8 @@ async function handleMessage(message, env) {
 
 function normalizeDigits(text) {
   return String(text)
-    .replace(/[٠-٩]/g, digit =&gt; String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
-    .replace(/[۰-۹]/g, digit =&gt; String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)));
+    .replace(/[٠-٩]/g, digit => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
+    .replace(/[۰-۹]/g, digit => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)));
 }
 
 async function adminPanel(chatId, env, data) {
@@ -493,16 +492,16 @@ async function adminPanel(chatId, env, data) {
   for (const userId of users) {
     const user = data.users[userId];
     if (!user) continue;
-    if (now - (user.last_active || 0) &lt;= ACTIVE_TIME) activeUsers++;
+    if (now - (user.last_active || 0) <= ACTIVE_TIME) activeUsers++;
     totalWorks += Array.isArray(user.works) ? user.works.length : 0;
   }
   const maintenance = isMaintenance(data);
   const botStatus = maintenance ? "🔴 في وضع الصيانة" : "🟢 يعمل";
-  const text = "🛠️ &lt;b&gt;لوحة تحكم Sandrone&lt;/b&gt;\n\n" +
-    `🤖 حالة البوت: &lt;b&gt;${botStatus}&lt;/b&gt;\n\n` +
-    `👥 إجمالي المشتركين: &lt;b&gt;${users.length}&lt;/b&gt;\n` +
-    `🟢 المستخدمون النشطون: &lt;b&gt;${activeUsers}&lt;/b&gt;\n` +
-    `📚 إجمالي الأعمال المراقبة: &lt;b&gt;${totalWorks}&lt;/b&gt;`;
+  const text = "🛠️ <b>لوحة تحكم Sandrone</b>\n\n" +
+    `🤖 حالة البوت: <b>${botStatus}</b>\n\n` +
+    `👥 إجمالي المشتركين: <b>${users.length}</b>\n` +
+    `🟢 المستخدمون النشطون: <b>${activeUsers}</b>\n` +
+    `📚 إجمالي الأعمال المراقبة: <b>${totalWorks}</b>`;
   await sendMessage(env, chatId, text, [
     [{ text: "📚 جميع الأعمال", callback_data: "admin_works" }],
     [{ text: "📢 رسالة جماعية", callback_data: "admin_broadcast" }],
@@ -511,26 +510,26 @@ async function adminPanel(chatId, env, data) {
 }
 
 async function showAllWorks(chatId, env, data) {
-  let text = "📚 &lt;b&gt;جميع الأعمال المراقبة&lt;/b&gt;\n\n";
+  let text = "📚 <b>جميع الأعمال المراقبة</b>\n\n";
   let total = 0;
   for (const userId of Object.keys(data.users || {})) {
     const user = data.users[userId];
     if (!user || !Array.isArray(user.works)) continue;
     for (const work of user.works) {
       total++;
-      text += `👤 &lt;b&gt;المستخدم:&lt;/b&gt; ${escapeHtml(userId)}\n` +
-        `📖 &lt;b&gt;الاسم:&lt;/b&gt; ${escapeHtml(work.name)}\n` +
-        `🏷️ &lt;b&gt;النوع:&lt;/b&gt; ${escapeHtml(work.type || "رواية")}\n` +
-        `🔢 &lt;b&gt;آخر فصل:&lt;/b&gt; ${work.last_chapter}\n` +
-        `🔗 &lt;b&gt;الرابط:&lt;/b&gt; ${escapeHtml(work.url)}\n\n━━━━━━━━━━━━━━\n\n`;
+      text += `👤 <b>المستخدم:</b> ${escapeHtml(userId)}\n` +
+        `📖 <b>الاسم:</b> ${escapeHtml(work.name)}\n` +
+        `🏷️ <b>النوع:</b> ${escapeHtml(work.type || "رواية")}\n` +
+        `🔢 <b>آخر فصل:</b> ${work.last_chapter}\n` +
+        `🔗 <b>الرابط:</b> ${escapeHtml(work.url)}\n\n━━━━━━━━━━━━━━\n\n`;
     }
   }
-  text += total === 0 ? "لا توجد أعمال مراقبة حاليًا." : `📊 &lt;b&gt;الإجمالي: ${total}&lt;/b&gt;`;
+  text += total === 0 ? "لا توجد أعمال مراقبة حاليًا." : `📊 <b>الإجمالي: ${total}</b>`;
   await sendMessage(env, chatId, text);
 }
 
 async function broadcastMaintenance(env, data) {
-  const message = "🔧 &lt;b&gt;تنبيه صيانة Sandrone&lt;/b&gt;\n\nتم تفعيل وضع الصيانة في Sandrone.\n\nلن تتمكن من استخدام البوت مؤقتًا حتى انتهاء الصيانة.";
+  const message = "🔧 <b>تنبيه صيانة Sandrone</b>\n\nتم تفعيل وضع الصيانة في Sandrone.\n\nلن تتمكن من استخدام البوت مؤقتًا حتى انتهاء الصيانة.";
   for (const userId of Object.keys(data.users || {})) {
     if (String(userId) === String(ADMIN_CHAT_ID)) continue;
     try { await sendMessage(env, userId, message); }
@@ -540,7 +539,7 @@ async function broadcastMaintenance(env, data) {
 async function broadcastMaintenanceOff(env, data) {
   for (const userId of Object.keys(data.users || {})) {
     if (String(userId) === String(ADMIN_CHAT_ID)) continue;
-    try { await sendMessage(env, userId, "🟢 &lt;b&gt;عاد Sandrone للعمل&lt;/b&gt;"); }
+    try { await sendMessage(env, userId, "🟢 <b>عاد Sandrone للعمل</b>"); }
     catch (error) { console.error("Maintenance off broadcast error:", userId, error); }
   }
 }
@@ -559,9 +558,8 @@ async function sendBroadcastMessage(env, data, message) {
 }
 function escapeHtml(text) {
   return String(text)
-    .replace(/&amp;/g, "&amp;amp;")
-    .replace(/&lt;/g, "&amp;lt;")
-    .replace(/&gt;/g, "&amp;gt;")
-    .replace(/"/g, "&amp;quot;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
-</pre></main></body></html>
