@@ -159,8 +159,9 @@ console.error(
 
 async function loadData(env) {
 
+
 const url =
-https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE};
+  `https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`;
 
 const response =
 await fetch(
