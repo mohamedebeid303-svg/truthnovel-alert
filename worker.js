@@ -1,2855 +1,567 @@
-const GITHUB_REPO = "mohamedebeid303-svg/truthnovel-alert";
+<!doctype html>
+<html lang="ar"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sandrone Worker - الكود المصحح</title><style>body{font-family:system-ui,sans-serif;margin:0;padding:20px;background:#f5f5f5;color:#222}main{max-width:1000px;margin:auto}h1{font-size:1.4rem}p{line-height:1.7}pre{white-space:pre;overflow:auto;direction:ltr;text-align:left;background:#171717;color:#eee;padding:18px;border-radius:10px;font-size:13px;line-height:1.5}a,button{display:inline-block;padding:10px 14px;margin:5px 5px 12px 0;border-radius:8px;border:0;background:#1769aa;color:white;text-decoration:none;cursor:pointer;font-size:14px}.hint{color:#555}</style></head><body><main><h1>كود Sandrone Worker المصحح</h1><p>يمكنك فتح هذه الصفحة في المتصفح ونسخ الكود أو تنزيل ملف JavaScript مباشرةً.</p><a href="worker_fixed.js" download="worker_fixed.js">تنزيل ملف worker_fixed.js</a><button onclick="navigator.clipboard.writeText(document.getElementById('code').innerText).then(()=>alert('تم نسخ الكود'))">نسخ الكود</button><p class="hint">إذا لم يعمل النسخ من المتصفح، نزّل ملف JavaScript من الرابط أعلاه.</p><pre id="code">const GITHUB_REPO = "mohamedebeid303-svg/truthnovel-alert";
 const DATA_FILE = "data.json";
-
 const ADMIN_CHAT_ID = "805162451";
-
 const ACTIVE_TIME = 15 * 60 * 1000;
 const SAVE_MAX_RETRIES = 3;
 
-// ======================================================
-// MAIN WORKER
-// ======================================================
-
 export default {
-
-async fetch(request, env) {
-
-try {  
-
-  if (request.method !== "POST") {  
-
-    return new Response(  
-      "Sandrone Bot is running.",  
-      {  
-        status: 200  
-      }  
-    );  
-  }  
-
-  const update = await request.json();  
-
-  await ensureBotCommands(env);  
-
-  if (update.callback_query) {  
-
-    await handleCallback(  
-      update,  
-      env  
-    );  
-
-    return new Response("OK");  
-  }  
-
-  if (update.message) {  
-
-    await handleMessage(  
-      update.message,  
-      env  
-    );  
-
-    return new Response("OK");  
-  }  
-
-  return new Response("OK");  
-
-} catch (error) {  
-
-  console.error(  
-    "SANDRONE WORKER ERROR:",  
-    error  
-  );  
-
-  return new Response("OK");  
-}
-
-}
+  async fetch(request, env) {
+    try {
+      if (request.method !== "POST") {
+        return new Response("Sandrone Bot is running.", { status: 200 });
+      }
+      const update = await request.json();
+      await ensureBotCommands(env);
+      if (update.callback_query) {
+        await handleCallback(update, env);
+        return new Response("OK");
+      }
+      if (update.message) {
+        await handleMessage(update.message, env);
+      }
+      return new Response("OK");
+    } catch (error) {
+      console.error("SANDRONE WORKER ERROR:", error);
+      return new Response("OK");
+    }
+  }
 };
-
-// ======================================================
-// TELEGRAM COMMANDS
-// ======================================================
 
 async function ensureBotCommands(env) {
-
-try {
-
-const commands = [  
-
-  {  
-    command: "start",  
-    description: "بدء استخدام البوت"  
-  },  
-
-  {  
-    command: "add",  
-    description: "إضافة عمل للمراقبة"  
-  },  
-
-  {  
-    command: "list",  
-    description: "عرض أعمالك"  
-  }  
-];  
-
-await fetch(  
-  `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`,  
-  {  
-    method: "POST",  
-
-    headers: {  
-      "Content-Type":  
-        "application/json"  
-    },  
-
-    body: JSON.stringify({  
-
-      commands,  
-
-      scope: {  
-        type: "default"  
-      }  
-    })  
-  }  
-);  
-
-await fetch(  
-  `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`,  
-  {  
-    method: "POST",  
-
-    headers: {  
-      "Content-Type":  
-        "application/json"  
-    },  
-
-    body: JSON.stringify({  
-
-      commands: [  
-
-        ...commands,  
-
-        {  
-          command: "admin",  
-          description: "لوحة تحكم المبرمج"  
-        }  
-
-      ],  
-
-      scope: {  
-        type: "chat",  
-        chat_id: Number(ADMIN_CHAT_ID)  
-      }  
-    })  
-  }  
-);
-
-} catch (error) {
-
-console.error(  
-  "COMMAND SETUP ERROR:",  
-  error  
-);
-
+  try {
+    const commands = [
+      { command: "start", description: "بدء استخدام البوت" },
+      { command: "add", description: "إضافة عمل للمراقبة" },
+      { command: "list", description: "عرض أعمالك" }
+    ];
+    const headers = { "Content-Type": "application/json" };
+    await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`, {
+      method: "POST", headers,
+      body: JSON.stringify({ commands, scope: { type: "default" } })
+    });
+    await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`, {
+      method: "POST", headers,
+      body: JSON.stringify({
+        commands: [...commands, { command: "admin", description: "لوحة تحكم المبرمج" }],
+        scope: { type: "chat", chat_id: Number(ADMIN_CHAT_ID) }
+      })
+    });
+  } catch (error) {
+    console.error("COMMAND SETUP ERROR:", error);
+  }
 }
-}
-
-// ======================================================
-// GITHUB - LOAD DATA
-// ======================================================
 
 async function loadData(env) {
-
-
-const url =
-  `https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`;
-
-const response =
-await fetch(
-url,
-{
-method: "GET",
-
-headers: {  
-
-      "Authorization":  
-        `Bearer ${env.GITHUB_TOKEN}`,  
-
-      "Accept":  
-        "application/vnd.github+json",  
-
-      "X-GitHub-Api-Version":  
-        "2022-11-28",  
-
-      "User-Agent":  
-        "Sandrone-Bot"  
-    }  
-  }  
-);
-
-if (!response.ok) {
-
-throw new Error(  
-  `GitHub LOAD ERROR: ${response.status} ${await response.text()}`  
-);
-
-}
-
-const result =
-await response.json();
-
-const decoded =
-atob(
-result.content.replace(/\n/g, "")
-);
-
-const text =
-new TextDecoder().decode(
-Uint8Array.from(
-decoded,
-c => c.charCodeAt(0)
-)
-);
-
-let data;
-
-try {
-
-data =  
-  JSON.parse(text);
-
-} catch {
-
-data = {};
-
-}
-
-if (!data.users) {
-
-data.users = {};
-
-}
-
-if (!data.settings) {
-
-data.settings = {  
-  maintenance: false  
-};
-
-}
-
-if (
-typeof data.settings.maintenance !==
-"boolean"
-) {
-
-data.settings.maintenance = false;
-
-}
-
-return {
-data,
-sha: result.sha
-};
-}
-
-// ======================================================
-// GITHUB - SAVE DATA
-// ======================================================
-
-async function saveData(
-env,
-data,
-sha
-) {
-
-let currentData =
-data;
-
-let currentSha =
-sha;
-
-for (
-let attempt = 1;
-attempt <= SAVE_MAX_RETRIES;
-attempt++
-) {
-
-const url =  
-  `https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`;  
-
-const json =  
-  JSON.stringify(  
-    currentData,  
-    null,  
-    2  
-  );  
-
-const encoded =  
-  btoa(  
-    unescape(  
-      encodeURIComponent(json)  
-    )  
-  );  
-
-const response =  
-  await fetch(  
-    url,  
-    {  
-      method: "PUT",  
-
-      headers: {  
-
-        "Authorization":  
-          `Bearer ${env.GITHUB_TOKEN}`,  
-
-        "Accept":  
-          "application/vnd.github+json",  
-
-        "Content-Type":  
-          "application/json",  
-
-        "X-GitHub-Api-Version":  
-          "2022-11-28",  
-
-        "User-Agent":  
-          "Sandrone-Bot"  
-      },  
-
-      body: JSON.stringify({  
-
-        message:  
-          "Update Sandrone bot data",  
-
-        content:  
-          encoded,  
-
-        sha:  
-          currentSha  
-      })  
-    }  
-  );  
-
-if (response.ok) {  
-
-  return await response.json();  
-}  
-
-const errorText =  
-  await response.text();  
-
-if (response.status === 409) {  
-
-  console.warn(  
-    `GitHub SAVE CONFLICT (attempt ${attempt}/${SAVE_MAX_RETRIES}). Reloading latest data...`  
-  );  
-
-  if (  
-    attempt === SAVE_MAX_RETRIES  
-  ) {  
-
-    console.error(  
-      "GitHub SAVE CONFLICT: retries exhausted.",  
-      errorText  
-    );  
-
-    throw new Error(  
-      "GitHub SAVE ERROR: 409 after retries"  
-    );  
-  }  
-
-  const latest =  
-    await loadData(env);  
-
-  currentData =  
-    mergeWorkerChanges(  
-      latest.data,  
-      currentData  
-    );  
-
-  currentSha =  
-    latest.sha;  
-
-  continue;  
-}  
-
-console.error(  
-  "GitHub SAVE ERROR:",  
-  response.status,  
-  errorText  
-);  
-
-throw new Error(  
-  `GitHub SAVE ERROR: ${response.status}`  
-);
-
-}
-
-throw new Error(
-"GitHub SAVE ERROR: retries exhausted"
-);
-}
-
-// ======================================================
-// MERGE AFTER GITHUB CONFLICT
-// ======================================================
-
-function mergeWorkerChanges(
-latestData,
-localData
-) {
-
-const merged =
-latestData;
-
-if (
-!merged.users ||
-typeof merged.users !== "object"
-) {
-
-merged.users = {};
-
-}
-
-if (
-!localData.users ||
-typeof localData.users !== "object"
-) {
-
-return merged;
-
-}
-
-for (
-const userId of
-Object.keys(localData.users)
-) {
-
-const localUser =  
-  localData.users[userId];  
-
-if (!localUser) {  
-  continue;  
-}  
-
-if (  
-  !merged.users[userId]  
-) {  
-
-  merged.users[userId] =  
-    localUser;  
-
-  continue;  
-}  
-
-const latestUser =  
-  merged.users[userId];  
-
-if (  
-  !latestUser ||  
-  typeof latestUser !== "object"  
-) {  
-
-  merged.users[userId] =  
-    localUser;  
-
-  continue;  
-}  
-
-if (  
-  Object.prototype.hasOwnProperty.call(  
-    localUser,  
-    "last_active"  
-  )  
-) {  
-
-  latestUser.last_active =  
-    Math.max(  
-      Number(latestUser.last_active || 0),  
-      Number(localUser.last_active || 0)  
-    );  
-}  
-
-if (  
-  Object.prototype.hasOwnProperty.call(  
-    localUser,  
-    "first_seen"  
-  ) &&  
-  !Object.prototype.hasOwnProperty.call(  
-    latestUser,  
-    "first_seen"  
-  )  
-) {  
-
-  latestUser.first_seen =  
-    localUser.first_seen;  
-}  
-
-if (  
-  Array.isArray(localUser.works)  
-) {  
-
-  if (  
-    !Array.isArray(latestUser.works)  
-  ) {  
-
-    latestUser.works =  
-      localUser.works;  
-
-  } else {  
-
-    mergeUserWorks(  
-      latestUser.works,  
-      localUser.works  
-    );  
-  }  
-}
-
-}
-
-return merged;
-}
-
-// ======================================================
-// MERGE USER WORKS
-// ======================================================
-
-function mergeUserWorks(
-latestWorks,
-localWorks
-) {
-
-for (
-const localWork of localWorks
-) {
-
-if (  
-  !localWork ||  
-  typeof localWork !== "object"  
-) {  
-
-  continue;  
-}  
-
-const localUrl =  
-  String(  
-    localWork.url || ""  
-  ).trim();  
-
-const localName =  
-  String(  
-    localWork.name || ""  
-  ).trim();  
-
-let match =  
-  null;  
-
-if (localUrl) {  
-
-  match =  
-    latestWorks.find(  
-      work =>  
-        work &&  
-        String(  
-          work.url || ""  
-        ).trim() === localUrl  
-    );  
-}  
-
-if (!match && localName) {  
-
-  match =  
-    latestWorks.find(  
-      work =>  
-        work &&  
-        String(  
-          work.name || ""  
-        ).trim() === localName  
-    );  
-}  
-
-if (!match) {  
-
-  latestWorks.push(  
-    localWork  
-  );  
-
-  continue;  
-}  
-
-const localChapter =  
-  Number(  
-    localWork.last_chapter  
-  );  
-
-const latestChapter =  
-  Number(  
-    match.last_chapter  
-  );  
-
-if (  
-  Number.isFinite(localChapter) &&  
-  (  
-    !Number.isFinite(latestChapter) ||  
-    localChapter > latestChapter  
-  )  
-) {  
-
-  match.last_chapter =  
-    localWork.last_chapter;  
-}
-
-}
-}
-
-// ======================================================
-// DELETE MESSAGE
-// ======================================================
-
-async function deleteMessage(
-env,
-chatId,
-messageId
-) {
-
-if (!messageId) {
-return;
-}
-
-try {
-
-const url =  
-  `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/deleteMessage`;  
-
-const response =  
-  await fetch(  
-    url,  
-    {  
-      method: "POST",  
-
-      headers: {  
-        "Content-Type":  
-          "application/json"  
-      },  
-
-      body: JSON.stringify({  
-
-        chat_id:  
-          chatId,  
-
-        message_id:  
-          messageId  
-      })  
-    }  
-  );  
-
-if (!response.ok) {  
-
-  console.error(  
-    "DELETE MESSAGE ERROR:",  
-    await response.text()  
-  );  
-}
-
-} catch (error) {
-
-console.error(  
-  "DELETE MESSAGE EXCEPTION:",  
-  error  
-);
-
-}
-}
-
-// ======================================================
-// DELETE PREVIOUS NORMAL BOT MESSAGE
-// ======================================================
-
-async function deletePreviousBotMessage(
-env,
-chatId,
-data
-) {
-
-const user =
-data.users[String(chatId)];
-
-if (!user) {
-return;
-}
-
-const messageId =
-user.last_bot_message_id;
-
-if (!messageId) {
-return;
-}
-
-await deleteMessage(
-env,
-chatId,
-messageId
-);
-
-user.last_bot_message_id =
-null;
-}
-
-// ======================================================
-// TELEGRAM SEND MESSAGE
-// ======================================================
-
-async function sendMessage(
-env,
-chatId,
-text,
-keyboard = null,
-data = null
-) {
-
-const isNormalMessage =
-data !== null;
-
-if (isNormalMessage) {
-
-await deletePreviousBotMessage(  
-  env,  
-  chatId,  
-  data  
-);
-
-}
-
-const url =
-https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage;
-
-const body = {
-
-chat_id:  
-  chatId,  
-
-text:  
-  text,  
-
-parse_mode:  
-  "HTML"
-
-};
-
-if (keyboard) {
-
-body.reply_markup = {  
-
-  inline_keyboard:  
-    keyboard  
-};
-
-}
-
-const response =
-await fetch(
-url,
-{
-method: "POST",
-
-headers: {  
-      "Content-Type":  
-        "application/json"  
-    },  
-
-    body:  
-      JSON.stringify(body)  
-  }  
-);
-
-if (!response.ok) {
-
-console.error(  
-  "Telegram sendMessage ERROR:",  
-  response.status,  
-  await response.text()  
-);  
-
-return null;
-
-}
-
-let result;
-
-try {
-
-result =  
-  await response.json();
-
-} catch {
-
-return null;
-
-}
-
-if (
-isNormalMessage &&
-result &&
-result.ok &&
-result.result &&
-result.result.message_id
-) {
-
-const user =  
-  data.users[String(chatId)];  
-
-if (user) {  
-
-  user.last_bot_message_id =  
-    result.result.message_id;  
-}
-
-}
-
-return result;
-}
-
-// ======================================================
-// CALLBACK ANSWER
-// ======================================================
-
-async function answerCallback(
-env,
-callbackId,
-text = ""
-) {
-
-const url =
-https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/answerCallbackQuery;
-
-await fetch(
-url,
-{
-method: "POST",
-
-headers: {  
-    "Content-Type":  
-      "application/json"  
-  },  
-
-  body: JSON.stringify({  
-
-    callback_query_id:  
-      callbackId,  
-
-    text,  
-
-    show_alert:  
-      false  
-  })  
-}
-
-);
-}
-
-// ======================================================
-// USER MANAGEMENT
-// ======================================================
-
-function ensureUser(
-data,
-userId
-) {
-
-if (!data.users[userId]) {
-
-data.users[userId] = {  
-
-  works: [],  
-
-  state: null,  
-
-  first_seen:  
-    Date.now(),  
-
-  last_active:  
-    Date.now(),  
-
-  last_bot_message_id:  
-    null  
-};  
-
-return true;
-
-}
-
-if (
-!Object.prototype.hasOwnProperty.call(
-data.users[userId],
-"last_bot_message_id"
-)
-) {
-
-data.users[userId]  
-  .last_bot_message_id =  
-    null;
-
-}
-
-return false;
-}
-
-function updateActivity(
-data,
-userId
-) {
-
-if (!data.users[userId]) {
-
-ensureUser(  
-  data,  
-  userId  
-);
-
-}
-
-data.users[userId].last_active =
-Date.now();
-}
-
-// ======================================================
-// ADMIN CHECK
-// ======================================================
-
-function isAdmin(chatId) {
-
-return String(chatId) ===
-String(ADMIN_CHAT_ID);
-}
-
-// ======================================================
-// MAINTENANCE
-// ======================================================
-
-function isMaintenance(data) {
-
-return Boolean(
-data.settings &&
-data.settings.maintenance
-);
-}
-
-// ======================================================
-// WORK TYPE NAME
-// ======================================================
-
-function getTypeName(type) {
-
-const types = {
-
-"رواية":  
-  "الرواية",  
-
-"مانجا":  
-  "المانجا",  
-
-"مانهوا":  
-  "المانهوا",  
-
-"مانها":  
-  "المانها"
-
-};
-
-return types[type] || type;
-}
-
-// ======================================================
-// MAIN KEYBOARD
-// ======================================================
-
-function mainKeyboard() {
-
-return [
-
-[  
-  {  
-    text:  
-      "➕ إضافة عمل",  
-
-    callback_data:  
-      "add"  
-  }  
-],  
-
-[  
-  {  
-    text:  
-      "📚 أعمالي",  
-
-    callback_data:  
-      "list"  
-  }  
-]
-
-];
-}
-
-// ======================================================
-// WORK TYPE KEYBOARD
-// ======================================================
-
-function workTypeKeyboard() {
-
-return [
-
-[  
-
-  {  
-    text:  
-      "📖 رواية",  
-
-    callback_data:  
-      "type_novel"  
-  },  
-
-  {  
-    text:  
-      "📚 مانجا",  
-
-    callback_data:  
-      "type_manga"  
-  }  
-
-],  
-
-[  
-
-  {  
-    text:  
-      "📘 مانهوا",  
-
-    callback_data:  
-      "type_manhwa"  
-  },  
-
-  {  
-    text:  
-      "📕 مانها",  
-
-    callback_data:  
-      "type_manhua"  
-  }  
-
-]
-
-];
-}
-
-// ======================================================
-// START COMMAND
-// ======================================================
-
-async function startCommand(
-message,
-env,
-data,
-sha
-) {
-
-const userId =
-String(message.chat.id);
-
-ensureUser(
-data,
-userId
-);
-
-updateActivity(
-data,
-userId
-);
-
-await sendMessage(
-env,
-message.chat.id,
-"👋 <b>مرحبًا، معك Sandrone</b>\n\n" +
-"سأساعدك في مراقبة أعمالك وإعلامك عند صدور فصل جديد.\n\n" +
-"اختر أحد الخيارات من القائمة:",
-mainKeyboard(),
-data
-);
-
-await saveData(
-env,
-data,
-sha
-);
-}
-
-// ======================================================
-// ADD COMMAND
-// ======================================================
-
-async function addCommand(
-message,
-env,
-data,
-sha
-) {
-
-const userId =
-String(message.chat.id);
-
-ensureUser(
-data,
-userId
-);
-
-data.users[userId].state = {
-
-step:  
-  "waiting_type"
-
-};
-
-updateActivity(
-data,
-userId
-);
-
-await sendMessage(
-env,
-message.chat.id,
-"➕ <b>إضافة عمل جديد</b>\n\n" +
-"اختر نوع العمل:",
-workTypeKeyboard(),
-data
-);
-
-await saveData(
-env,
-data,
-sha
-);
-}
-
-// ======================================================
-// LIST COMMAND
-// ======================================================
-
-async function listCommand(
-message,
-env,
-data,
-sha
-) {
-
-const userId =
-String(message.chat.id);
-
-const user =
-data.users[userId];
-
-if (
-!user ||
-!user.works ||
-user.works.length === 0
-) {
-
-await sendMessage(  
-  env,  
-  message.chat.id,  
-  "📚 لا توجد أعمال مضافة إلى قائمتك حاليًا.\n\n" +  
-  "اضغط ➕ إضافة عمل لإضافة أول عمل.",  
-  null,  
-  data  
-);  
-
-await saveData(  
-  env,  
-  data,  
-  sha  
-);  
-
-return;
-
-}
-
-let text =
-"📚 <b>أعمالك المراقبة:</b>\n\n";
-
-const keyboard = [];
-
-user.works.forEach(
-(work, index) => {
-
-const type =  
-    work.type || "رواية";  
-
-  text +=  
-    `${index + 1}. <b>${escapeHtml(work.name)}</b>\n` +  
-    `🏷️ النوع: ${escapeHtml(type)}\n` +  
-    `🔢 آخر فصل: ${work.last_chapter}\n` +  
-    `🔗 ${escapeHtml(work.url)}\n\n`;  
-
-  keyboard.push([  
-    {  
-      text:  
-        `🗑️ حذف ${work.name}`,  
-
-      callback_data:  
-        `remove_${index}`  
-    }  
-  ]);  
-}
-
-);
-
-await sendMessage(
-env,
-message.chat.id,
-text,
-keyboard,
-data
-);
-
-await saveData(
-env,
-data,
-sha
-);
-}
-
-// ======================================================
-// CALLBACK HANDLER
-// ======================================================
-
-async function handleCallback(
-update,
-env
-) {
-
-const callback =
-update.callback_query;
-
-const chatId =
-String(
-callback.message.chat.id
-);
-
-const action =
-callback.data;
-
-const {
-data,
-sha
-} =
-await loadData(env);
-
-const isAdminUser =
-isAdmin(chatId);
-
-// ==================================================
-// MAINTENANCE GUARD
-// ==================================================
-
-if (
-isMaintenance(data) &&
-!isAdminUser
-) {
-
-await answerCallback(  
-  env,  
-  callback.id,  
-  "🔧 البوت في وضع الصيانة حاليًا."  
-);  
-
-await sendMessage(  
-  env,  
-  chatId,  
-  "🔧 <b>البوت في وضع الصيانة حاليًا.</b>\n\n" +  
-  "يرجى المحاولة مرة أخرى لاحقًا.",  
-  null,  
-  data  
-);  
-
-return;
-
-}
-
-ensureUser(
-data,
-chatId
-);
-
-updateActivity(
-data,
-chatId
-);
-
-// ==================================================
-// ADD
-// ==================================================
-
-if (action === "add") {
-
-await answerCallback(  
-  env,  
-  callback.id  
-);  
-
-data.users[chatId].state = {  
-
-  step:  
-    "waiting_type"  
-};  
-
-await sendMessage(  
-  env,  
-  chatId,  
-  "➕ <b>إضافة عمل جديد</b>\n\n" +  
-  "اختر نوع العمل:",  
-  workTypeKeyboard(),  
-  data  
-);  
-
-await saveData(  
-  env,  
-  data,  
-  sha  
-);  
-
-return;
-
-}
-
-// ==================================================
-// TYPE
-// ==================================================
-
-if (
-action === "type_novel" ||
-action === "type_manga" ||
-action === "type_manhwa" ||
-action === "type_manhua"
-) {
-
-const types = {  
-
-  type_novel:  
-    "رواية",  
-
-  type_manga:  
-    "مانجا",  
-
-  type_manhwa:  
-    "مانهوا",  
-
-  type_manhua:  
-    "مانها"  
-};  
-
-const selectedType =  
-  types[action];  
-
-const typeName =  
-  getTypeName(  
-    selectedType  
-  );  
-
-data.users[chatId].state = {  
-
-  step:  
-    "waiting_name",  
-
-  type:  
-    selectedType  
-};  
-
-await answerCallback(  
-  env,  
-  callback.id,  
-  `تم اختيار: ${selectedType}`  
-);  
-
-await sendMessage(  
-  env,  
-  chatId,  
-  `🏷️ <b>نوع العمل:</b> ${escapeHtml(selectedType)}\n\n` +  
-  `✏️ الآن أرسل اسم ${escapeHtml(typeName)}.`,  
-  null,  
-  data  
-);  
-
-await saveData(  
-  env,  
-  data,  
-  sha  
-);  
-
-return;
-
-}
-
-// ==================================================
-// LIST
-// ==================================================
-
-if (action === "list") {
-
-await answerCallback(  
-  env,  
-  callback.id  
-);  
-
-await listCommand(  
-  callback.message,  
-  env,  
-  data,  
-  sha  
-);  
-
-return;
-
-}
-
-// ==================================================
-// REMOVE
-// ==================================================
-
-if (
-action.startsWith("remove_")
-) {
-
-const index =  
-  Number(  
-    action.split("_")[1]  
-  );  
-
-const user =  
-  data.users[chatId];  
-
-if (  
-  !user ||  
-  !user.works ||  
-  !user.works[index]  
-) {  
-
-  await answerCallback(  
-    env,  
-    callback.id,  
-    "العمل غير موجود."  
-  );  
-
-  return;  
-}  
-
-const work =  
-  user.works[index];  
-
-const type =  
-  work.type || "رواية";  
-
-const typeName =  
-  getTypeName(type);  
-
-await answerCallback(  
-  env,  
-  callback.id  
-);  
-
-await sendMessage(  
-  env,  
-  chatId,  
-  `⚠️ هل أنت متأكد من حذف ${escapeHtml(typeName)}:\n\n` +  
-  `<b>${escapeHtml(work.name)}</b>\n\n` +  
-  `سيتم إزالته من قائمتك فقط.`,  
-  [  
-    [  
-      {  
-        text:  
-          "✅ نعم، احذف",  
-
-        callback_data:  
-          `confirm_remove_${index}`  
-      },  
-
-      {  
-        text:  
-          "❌ إلغاء",  
-
-        callback_data:  
-          "cancel_remove"  
-      }  
-    ]  
-  ],  
-  data  
-);  
-
-await saveData(  
-  env,  
-  data,  
-  sha  
-);  
-
-return;
-
-}
-
-// ==================================================
-// CONFIRM REMOVE
-// ==================================================
-
-if (
-action.startsWith(
-"confirm_remove_"
-)
-) {
-
-const index =  
-  Number(  
-    action.split("_")[2]  
-  );  
-
-const user =  
-  data.users[chatId];  
-
-if (  
-  !user ||  
-  !user.works ||  
-  !user.works[index]  
-) {  
-
-  await answerCallback(  
-    env,  
-    callback.id,  
-    "العمل غير موجود."  
-  );  
-
-  return;  
-}  
-
-const removed =  
-  user.works.splice(  
-    index,  
-    1  
-  )[0];  
-
-const type =  
-  removed.type || "رواية";  
-
-const typeName =  
-  getTypeName(type);  
-
-await answerCallback(  
-  env,  
-  callback.id,  
-  "تم الحذف."  
-);  
-
-await sendMessage(  
-  env,  
-  chatId,  
-  `🗑️ تم حذف ${escapeHtml(typeName)} ` +  
-  `<b>${escapeHtml(removed.name)}</b> من قائمتك.`,  
-  null,  
-  data  
-);  
-
-await saveData(  
-  env,  
-  data,  
-  sha  
-);  
-
-return;
-
-}
-
-// ==================================================
-// CANCEL REMOVE
-// ==================================================
-
-if (
-action === "cancel_remove"
-) {
-
-await answerCallback(  
-  env,  
-  callback.id,  
-  "تم الإلغاء."  
-);  
-
-await sendMessage(  
-  env,  
-  chatId,  
-  "❌ تم إلغاء عملية الحذف.",  
-  null,  
-  data  
-);  
-
-await saveData(  
-  env,  
-  data,  
-  sha  
-);  
-
-return;
-
-}
-
-// ==================================================
-// ADMIN PANEL
-// ==================================================
-
-if (
-action === "admin_panel"
-) {
-
-if (!isAdmin(chatId)) {  
-
-  await answerCallback(  
-    env,  
-    callback.id,  
-    "غير مصرح."  
-  );  
-
-  return;  
-}  
-
-await answerCallback(  
-  env,  
-  callback.id  
-);  
-
-await adminPanel(  
-  chatId,  
-  env,  
-  data  
-);  
-
-return;
-
-}
-
-// ==================================================
-// MAINTENANCE
-// ==================================================
-
-if (
-action === "maintenance_on" ||
-action === "maintenance_off"
-) {
-
-if (!isAdmin(chatId)) {  
-
-  await answerCallback(  
-    env,  
-    callback.id,  
-    "غير مصرح."  
-  );  
-
-  return;  
-}  
-
-data.settings.maintenance =  
-  action === "maintenance_on";  
-
-try {  
-
-  await saveData(  
-    env,  
-    data,  
-    sha  
-  );  
-
-} catch (error) {  
-
-  console.error(  
-    "MAINTENANCE SAVE ERROR:",  
-    error  
-  );  
-
-  await answerCallback(  
-    env,  
-    callback.id,  
-    "فشل حفظ حالة الصيانة."  
-  );  
-
-  await sendMessage(  
-    env,  
-    chatId,  
-    "❌ <b>تعذر تغيير وضع الصيانة.</b>\n\n" +  
-    "لم يتم اعتماد التغيير لأن حفظ البيانات في GitHub فشل.",  
-    null,  
-    null  
-  );  
-
-  return;  
-}  
-
-await answerCallback(  
-  env,  
-  callback.id  
-);  
-
-if (  
-  data.settings.maintenance  
-) {  
-
-  await broadcastMaintenance(  
-    env,  
-    data  
-  );  
-
-  await sendMessage(  
-    env,  
-    chatId,  
-    "🔴 <b>تم تفعيل وضع الصيانة.</b>\n\n" +  
-    "المستخدمون العاديون لن يتمكنوا من استخدام البوت حتى إيقاف الصيانة."  
-  );  
-
-} else {  
-
-  await broadcastMaintenanceOff(  
-    env,  
-    data  
-  );  
-
-  await sendMessage(  
-    env,  
-    chatId,  
-    "🟢 <b>تم إيقاف وضع الصيانة.</b>\n\n" +  
-    "عاد البوت للعمل للمستخدمين."  
-  );  
-}  
-
-return;
-
-}
-
-// ==================================================
-// ADMIN WORKS
-// ==================================================
-
-if (
-action === "admin_works"
-) {
-
-if (!isAdmin(chatId)) {  
-
-  await answerCallback(  
-    env,  
-    callback.id,  
-    "غير مصرح."  
-  );  
-
-  return;  
-}  
-
-await answerCallback(  
-  env,  
-  callback.id  
-);  
-
-await showAllWorks(  
-  chatId,  
-  env,  
-  data  
-);  
-
-return;
-
-}
-
-// ==================================================
-// ADMIN BROADCAST
-// ==================================================
-
-if (
-action === "admin_broadcast"
-) {
-
-if (!isAdmin(chatId)) {  
-
-  await answerCallback(  
-    env,  
-    callback.id,  
-    "غير مصرح."  
-  );  
-
-  return;  
-}  
-
-data.users[chatId].state = {  
-
-  step:  
-    "admin_broadcast"  
-};  
-
-await answerCallback(  
-  env,  
-  callback.id  
-);  
-
-await sendMessage(  
-  env,  
-  chatId,  
-  "📢 <b>إرسال رسالة جماعية</b>\n\n" +  
-  "اكتب الآن الرسالة التي تريد إرسالها لجميع مستخدمي البوت.\n\n" +  
-  "❌ للإلغاء أرسل /cancel",  
-  null  
-);  
-
-await saveData(  
-  env,  
-  data,  
-  sha  
-);  
-
-return;
-
-}
-}
-
-// ======================================================
-// MESSAGE HANDLER
-// ======================================================
-
-async function handleMessage(
-message,
-env
-) {
-
-const chatId =
-String(message.chat.id);
-
-const text =
-(message.text || "").trim();
-
-const {
-data,
-sha
-} =
-await loadData(env);
-
-const isAdminUser =
-isAdmin(chatId);
-
-ensureUser(
-data,
-chatId
-);
-
-// ==================================================
-// START
-// ==================================================
-
-if (
-text === "/start"
-) {
-
-await startCommand(  
-  message,  
-  env,  
-  data,  
-  sha  
-);  
-
-return;
-
-}
-
-// ==================================================
-// ADMIN
-// ==================================================
-
-if (
-text === "/admin"
-) {
-
-if (!isAdminUser) {  
-
-  await sendMessage(  
-    env,  
-    chatId,  
-    "⛔ هذا الأمر متاح للمبرمج فقط.",  
-    null,  
-    data  
-  );  
-
-  await saveData(  
-    env,  
-    data,  
-    sha  
-  );  
-
-  return;  
-}  
-
-await adminPanel(  
-  chatId,  
-  env,  
-  data  
-);  
-
-return;
-
-}
-
-// ==================================================
-// CANCEL BROADCAST
-// ==================================================
-
-if (
-isAdminUser &&
-text === "/cancel"
-) {
-
-const adminState =  
-  data.users[chatId].state;  
-
-if (  
-  adminState &&  
-  adminState.step ===  
-  "admin_broadcast"  
-) {  
-
-  data.users[chatId].state =  
-    null;  
-
-  await sendMessage(  
-    env,  
-    chatId,  
-    "❌ تم إلغاء الرسالة الجماعية."  
-  );  
-
-  await saveData(  
-    env,  
-    data,  
-    sha  
-  );  
-
-  return;  
-}
-
-}
-
-// ==================================================
-// ADMIN BROADCAST MESSAGE
-// ==================================================
-
-if (
-isAdminUser &&
-data.users[chatId].state &&
-data.users[chatId].state.step ===
-"admin_broadcast"
-) {
-
-if (!text) {  
-
-  await sendMessage(  
-    env,  
-    chatId,  
-    "❌ أرسل نص الرسالة الجماعية.\n\n" +  
-    "أو أرسل /cancel للإلغاء."  
-  );  
-
-  return;  
-}  
-
-data.users[chatId].state =  
-  null;  
-
-await saveData(  
-  env,  
-  data,  
-  sha  
-);  
-
-await sendBroadcastMessage(  
-  env,  
-  data,  
-  text  
-);  
-
-await sendMessage(  
-  env,  
-  chatId,  
-  "✅ <b>تم إرسال الرسالة الجماعية.</b>"  
-);  
-
-return;
-
-}
-
-// ==================================================
-// MAINTENANCE
-// ==================================================
-
-if (
-isMaintenance(data) &&
-!isAdminUser
-) {
-
-await sendMessage(  
-  env,  
-  chatId,  
-  "🔧 <b>البوت في وضع الصيانة حاليًا.</b>\n\n" +  
-  "يرجى المحاولة مرة أخرى لاحقًا.",  
-  null,  
-  data  
-);  
-
-await saveData(  
-  env,  
-  data,  
-  sha  
-);  
-
-return;
-
-}
-
-// ==================================================
-// ACTIVITY
-// ==================================================
-
-const now =
-Date.now();
-
-const previousActivity =
-data.users[chatId].last_active || 0;
-
-const shouldSaveActivity =
-now -
-previousActivity >
-ACTIVE_TIME;
-
-updateActivity(
-data,
-chatId
-);
-
-// ==================================================
-// ADD
-// ==================================================
-
-if (
-text === "/add"
-) {
-
-await addCommand(  
-  message,  
-  env,  
-  data,  
-  sha  
-);  
-
-return;
-
-}
-
-// ==================================================
-// LIST
-// ==================================================
-
-if (
-text === "/list"
-) {
-
-await listCommand(  
-  message,  
-  env,  
-  data,  
-  sha  
-);  
-
-return;
-
-}
-
-// ==================================================
-// USER STATE
-// ==================================================
-
-const user =
-data.users[chatId];
-
-if (
-!user.state
-) {
-
-await sendMessage(  
-  env,  
-  chatId,  
-  "اختر أمرًا من القائمة 👇",  
-  mainKeyboard(),  
-  data  
-);  
-
-await saveData(  
-  env,  
-  data,  
-  sha  
-);  
-
-return;
-
-}
-
-// ==================================================
-// WAITING TYPE
-// ==================================================
-
-if (
-user.state.step ===
-"waiting_type"
-) {
-
-await sendMessage(  
-  env,  
-  chatId,  
-  "🏷️ <b>اختر نوع العمل أولًا:</b>",  
-  workTypeKeyboard(),  
-  data  
-);  
-
-await saveData(  
-  env,  
-  data,  
-  sha  
-);  
-
-return;
-
-}
-
-// ==================================================
-// WAITING NAME
-// ==================================================
-
-if (
-user.state.step ===
-"waiting_name"
-) {
-
-const type =  
-  user.state.type;  
-
-const typeName =  
-  getTypeName(type);  
-
-if (!text) {  
-
-  await sendMessage(  
-    env,  
-    chatId,  
-    `❌ أرسل اسم ${escapeHtml(typeName)}.`,  
-    null,  
-    data  
-  );  
-
-  await saveData(  
-    env,  
-    data,  
-    sha  
-  );  
-
-  return;  
-}  
-
-user.state = {  
-
-  step:  
-    "waiting_url",  
-
-  type,  
-
-  name:  
-    text  
-};  
-
-await sendMessage(  
-  env,  
-  chatId,  
-  `🔗 الآن أرسل رابط صفحة ${escapeHtml(typeName)}.`,  
-  null,  
-  data  
-);  
-
-await saveData(  
-  env,  
-  data,  
-  sha  
-);  
-
-return;
-
-}
-
-// ==================================================
-// WAITING URL
-// ==================================================
-
-if (
-user.state.step ===
-"waiting_url"
-) {
-
-const url =  
-  text;  
-
-const type =  
-  user.state.type;  
-
-const typeName =  
-  getTypeName(type);  
-
-if (  
-  !/^https?:\/\/\S+$/i.test(url)  
-) {  
-
-  await sendMessage(  
-    env,  
-    chatId,  
-    `❌ الرابط غير صحيح.\n\n` +  
-    `أرسل رابط صفحة ${escapeHtml(typeName)} يبدأ بـ <b>http://</b> أو <b>https://</b>.`,  
-    null,  
-    data  
-  );  
-
-  await saveData(  
-    env,  
-    data,  
-    sha  
-  );  
-
-  return;  
-}  
-
-
-try {
+  const url = `https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`;
   const response = await fetch(url, {
     method: "GET",
-    redirect: "follow",
     headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
-      "Accept":
-        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language":
-        "zh-CN,zh;q=0.9,en;q=0.8"
+      Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "Sandrone-Bot"
     }
   });
-
-  const contentType =
-    response.headers.get("content-type") || "";
-
-  console.log("URL VALIDATION:", {
-    requestedUrl: url,
-    finalUrl: response.url,
-    status: response.status,
-    contentType
-  });
-
   if (!response.ok) {
-    await sendMessage(
-      env,
-      chatId,
-      `⚠️ تعذر التحقق من صفحة العمل.\n\n` +
-      `رمز استجابة الموقع: ${response.status}\n\n` +
-      (
-        response.status === 403
+    throw new Error(`GitHub LOAD ERROR: ${response.status} ${await response.text()}`);
+  }
+  const result = await response.json();
+  const decoded = atob(result.content.replace(/\n/g, ""));
+  const jsonText = new TextDecoder().decode(
+    Uint8Array.from(decoded, c =&gt; c.charCodeAt(0))
+  );
+  let data;
+  try { data = JSON.parse(jsonText); } catch { data = {}; }
+  if (!data.users || typeof data.users !== "object") data.users = {};
+  if (!data.settings || typeof data.settings !== "object") data.settings = { maintenance: false };
+  if (typeof data.settings.maintenance !== "boolean") data.settings.maintenance = false;
+  return { data, sha: result.sha };
+}
+
+async function saveData(env, data, sha) {
+  let currentData = data;
+  let currentSha = sha;
+  for (let attempt = 1; attempt &lt;= SAVE_MAX_RETRIES; attempt++) {
+    const url = `https://api.github.com/repos/${GITHUB_REPO}/contents/${DATA_FILE}`;
+    const json = JSON.stringify(currentData, null, 2);
+    const encoded = btoa(unescape(encodeURIComponent(json)));
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "Sandrone-Bot"
+      },
+      body: JSON.stringify({ message: "Update Sandrone bot data", content: encoded, sha: currentSha })
+    });
+    if (response.ok) return await response.json();
+    const errorText = await response.text();
+    if (response.status === 409) {
+      console.warn(`GitHub SAVE CONFLICT (attempt ${attempt}/${SAVE_MAX_RETRIES}). Reloading latest data...`);
+      if (attempt === SAVE_MAX_RETRIES) {
+        console.error("GitHub SAVE CONFLICT: retries exhausted.", errorText);
+        throw new Error("GitHub SAVE ERROR: 409 after retries");
+      }
+      const latest = await loadData(env);
+      currentData = mergeWorkerChanges(latest.data, currentData);
+      currentSha = latest.sha;
+      continue;
+    }
+    console.error("GitHub SAVE ERROR:", response.status, errorText);
+    throw new Error(`GitHub SAVE ERROR: ${response.status}`);
+  }
+  throw new Error("GitHub SAVE ERROR: retries exhausted");
+}
+
+function mergeWorkerChanges(latestData, localData) {
+  const merged = latestData;
+  if (!merged.users || typeof merged.users !== "object") merged.users = {};
+  if (!localData.users || typeof localData.users !== "object") return merged;
+  for (const userId of Object.keys(localData.users)) {
+    const localUser = localData.users[userId];
+    if (!localUser) continue;
+    if (!merged.users[userId]) { merged.users[userId] = localUser; continue; }
+    const latestUser = merged.users[userId];
+    if (!latestUser || typeof latestUser !== "object") { merged.users[userId] = localUser; continue; }
+    if (Object.prototype.hasOwnProperty.call(localUser, "last_active")) {
+      latestUser.last_active = Math.max(Number(latestUser.last_active || 0), Number(localUser.last_active || 0));
+    }
+    if (Object.prototype.hasOwnProperty.call(localUser, "first_seen") &amp;&amp; !Object.prototype.hasOwnProperty.call(latestUser, "first_seen")) {
+      latestUser.first_seen = localUser.first_seen;
+    }
+    if (Array.isArray(localUser.works)) {
+      if (!Array.isArray(latestUser.works)) latestUser.works = localUser.works;
+      else mergeUserWorks(latestUser.works, localUser.works);
+    }
+    if (Object.prototype.hasOwnProperty.call(localUser, "state")) latestUser.state = localUser.state;
+    if (Object.prototype.hasOwnProperty.call(localUser, "last_bot_message_id")) latestUser.last_bot_message_id = localUser.last_bot_message_id;
+  }
+  if (localData.settings &amp;&amp; typeof localData.settings === "object") {
+    merged.settings = { ...(merged.settings || {}), ...localData.settings };
+  }
+  return merged;
+}
+
+function mergeUserWorks(latestWorks, localWorks) {
+  for (const localWork of localWorks) {
+    if (!localWork || typeof localWork !== "object") continue;
+    const localUrl = String(localWork.url || "").trim();
+    const localName = String(localWork.name || "").trim();
+    let match = localUrl ? latestWorks.find(work =&gt; work &amp;&amp; String(work.url || "").trim() === localUrl) : null;
+    if (!match &amp;&amp; localName) match = latestWorks.find(work =&gt; work &amp;&amp; String(work.name || "").trim() === localName);
+    if (!match) { latestWorks.push(localWork); continue; }
+    const localChapter = Number(localWork.last_chapter);
+    const latestChapter = Number(match.last_chapter);
+    if (Number.isFinite(localChapter) &amp;&amp; (!Number.isFinite(latestChapter) || localChapter &gt; latestChapter)) {
+      match.last_chapter = localWork.last_chapter;
+    }
+  }
+}
+
+async function deleteMessage(env, chatId, messageId) {
+  if (!messageId) return;
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/deleteMessage`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, message_id: messageId })
+    });
+    if (!response.ok) console.error("DELETE MESSAGE ERROR:", await response.text());
+  } catch (error) { console.error("DELETE MESSAGE EXCEPTION:", error); }
+}
+
+async function deletePreviousBotMessage(env, chatId, data) {
+  const user = data.users[String(chatId)];
+  if (!user || !user.last_bot_message_id) return;
+  await deleteMessage(env, chatId, user.last_bot_message_id);
+  user.last_bot_message_id = null;
+}
+
+async function sendMessage(env, chatId, text, keyboard = null, data = null) {
+  const isNormalMessage = data !== null;
+  if (isNormalMessage) await deletePreviousBotMessage(env, chatId, data);
+  const body = { chat_id: chatId, text, parse_mode: "HTML" };
+  if (keyboard) body.reply_markup = { inline_keyboard: keyboard };
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    console.error("Telegram sendMessage ERROR:", response.status, await response.text());
+    return null;
+  }
+  let result;
+  try { result = await response.json(); } catch { return null; }
+  if (isNormalMessage &amp;&amp; result?.ok &amp;&amp; result.result?.message_id) {
+    const user = data.users[String(chatId)];
+    if (user) user.last_bot_message_id = result.result.message_id;
+  }
+  return result;
+}
+
+async function answerCallback(env, callbackId, text = "") {
+  await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ callback_query_id: callbackId, text, show_alert: false })
+  });
+}
+
+function ensureUser(data, userId) {
+  if (!data.users[userId]) {
+    data.users[userId] = { works: [], state: null, first_seen: Date.now(), last_active: Date.now(), last_bot_message_id: null };
+    return true;
+  }
+  if (!Object.prototype.hasOwnProperty.call(data.users[userId], "last_bot_message_id")) data.users[userId].last_bot_message_id = null;
+  if (!Array.isArray(data.users[userId].works)) data.users[userId].works = [];
+  return false;
+}
+function updateActivity(data, userId) { if (!data.users[userId]) ensureUser(data, userId); data.users[userId].last_active = Date.now(); }
+function isAdmin(chatId) { return String(chatId) === String(ADMIN_CHAT_ID); }
+function isMaintenance(data) { return Boolean(data.settings &amp;&amp; data.settings.maintenance); }
+function getTypeName(type) {
+  return ({ "رواية": "الرواية", "مانجا": "المانجا", "مانهوا": "المانهوا", "مانها": "المانها" })[type] || type;
+}
+function mainKeyboard() {
+  return [[{ text: "➕ إضافة عمل", callback_data: "add" }], [{ text: "📚 أعمالي", callback_data: "list" }]];
+}
+function workTypeKeyboard() {
+  return [
+    [{ text: "📖 رواية", callback_data: "type_novel" }, { text: "📚 مانجا", callback_data: "type_manga" }],
+    [{ text: "📘 مانهوا", callback_data: "type_manhwa" }, { text: "📕 مانها", callback_data: "type_manhua" }]
+  ];
+}
+
+async function startCommand(message, env, data, sha) {
+  const userId = String(message.chat.id);
+  ensureUser(data, userId); updateActivity(data, userId);
+  await sendMessage(env, message.chat.id,
+    "👋 &lt;b&gt;مرحبًا، معك Sandrone&lt;/b&gt;\n\nسأساعدك في مراقبة أعمالك وإعلامك عند صدور فصل جديد.\n\nاختر أحد الخيارات من القائمة:",
+    mainKeyboard(), data);
+  await saveData(env, data, sha);
+}
+async function addCommand(message, env, data, sha) {
+  const userId = String(message.chat.id);
+  ensureUser(data, userId);
+  data.users[userId].state = { step: "waiting_type" };
+  updateActivity(data, userId);
+  await sendMessage(env, message.chat.id, "➕ &lt;b&gt;إضافة عمل جديد&lt;/b&gt;\n\nاختر نوع العمل:", workTypeKeyboard(), data);
+  await saveData(env, data, sha);
+}
+async function listCommand(message, env, data, sha) {
+  const user = data.users[String(message.chat.id)];
+  if (!user || !user.works || user.works.length === 0) {
+    await sendMessage(env, message.chat.id, "📚 لا توجد أعمال مضافة إلى قائمتك حاليًا.\n\nاضغط ➕ إضافة عمل لإضافة أول عمل.", null, data);
+    await saveData(env, data, sha); return;
+  }
+  let text = "📚 &lt;b&gt;أعمالك المراقبة:&lt;/b&gt;\n\n";
+  const keyboard = [];
+  user.works.forEach((work, index) =&gt; {
+    const type = work.type || "رواية";
+    text += `${index + 1}. &lt;b&gt;${escapeHtml(work.name)}&lt;/b&gt;\n🏷️ النوع: ${escapeHtml(type)}\n🔢 آخر فصل: ${work.last_chapter}\n🔗 ${escapeHtml(work.url)}\n\n`;
+    keyboard.push([{ text: `🗑️ حذف ${String(work.name).slice(0, 50)}`, callback_data: `remove_${index}` }]);
+  });
+  await sendMessage(env, message.chat.id, text, keyboard, data);
+  await saveData(env, data, sha);
+}
+
+async function handleCallback(update, env) {
+  const callback = update.callback_query;
+  const chatId = String(callback.message.chat.id);
+  const action = callback.data;
+  const { data, sha } = await loadData(env);
+  const isAdminUser = isAdmin(chatId);
+  if (isMaintenance(data) &amp;&amp; !isAdminUser) {
+    await answerCallback(env, callback.id, "🔧 البوت في وضع الصيانة حاليًا.");
+    await sendMessage(env, chatId, "🔧 &lt;b&gt;البوت في وضع الصيانة حاليًا.&lt;/b&gt;\n\nيرجى المحاولة مرة أخرى لاحقًا.", null, data);
+    await saveData(env, data, sha); return;
+  }
+  ensureUser(data, chatId); updateActivity(data, chatId);
+  if (action === "add") {
+    await answerCallback(env, callback.id);
+    data.users[chatId].state = { step: "waiting_type" };
+    await sendMessage(env, chatId, "➕ &lt;b&gt;إضافة عمل جديد&lt;/b&gt;\n\nاختر نوع العمل:", workTypeKeyboard(), data);
+    await saveData(env, data, sha); return;
+  }
+  const types = { type_novel: "رواية", type_manga: "مانجا", type_manhwa: "مانهوا", type_manhua: "مانها" };
+  if (types[action]) {
+    const selectedType = types[action];
+    data.users[chatId].state = { step: "waiting_name", type: selectedType };
+    await answerCallback(env, callback.id, `تم اختيار: ${selectedType}`);
+    await sendMessage(env, chatId, `🏷️ &lt;b&gt;نوع العمل:&lt;/b&gt; ${escapeHtml(selectedType)}\n\n✏️ الآن أرسل اسم ${escapeHtml(getTypeName(selectedType))}.`, null, data);
+    await saveData(env, data, sha); return;
+  }
+  if (action === "list") {
+    await answerCallback(env, callback.id); await listCommand(callback.message, env, data, sha); return;
+  }
+  if (action.startsWith("remove_")) {
+    const index = Number(action.split("_")[1]); const user = data.users[chatId];
+    if (!user?.works?.[index]) { await answerCallback(env, callback.id, "العمل غير موجود."); return; }
+    const work = user.works[index];
+    await answerCallback(env, callback.id);
+    await sendMessage(env, chatId,
+      `⚠️ هل أنت متأكد من حذف ${escapeHtml(getTypeName(work.type || "رواية"))}:\n\n&lt;b&gt;${escapeHtml(work.name)}&lt;/b&gt;\n\nسيتم إزالته من قائمتك فقط.`,
+      [[{ text: "✅ نعم، احذف", callback_data: `confirm_remove_${index}` }, { text: "❌ إلغاء", callback_data: "cancel_remove" }]], data);
+    await saveData(env, data, sha); return;
+  }
+  if (action.startsWith("confirm_remove_")) {
+    const index = Number(action.split("_")[2]); const user = data.users[chatId];
+    if (!user?.works?.[index]) { await answerCallback(env, callback.id, "العمل غير موجود."); return; }
+    const removed = user.works.splice(index, 1)[0];
+    await answerCallback(env, callback.id, "تم الحذف.");
+    await sendMessage(env, chatId, `🗑️ تم حذف ${escapeHtml(getTypeName(removed.type || "رواية"))} &lt;b&gt;${escapeHtml(removed.name)}&lt;/b&gt; من قائمتك.`, null, data);
+    await saveData(env, data, sha); return;
+  }
+  if (action === "cancel_remove") {
+    await answerCallback(env, callback.id, "تم الإلغاء.");
+    await sendMessage(env, chatId, "❌ تم إلغاء عملية الحذف.", null, data);
+    await saveData(env, data, sha); return;
+  }
+  if (action === "admin_panel") {
+    if (!isAdminUser) { await answerCallback(env, callback.id, "غير مصرح."); return; }
+    await answerCallback(env, callback.id); await adminPanel(chatId, env, data); return;
+  }
+  if (action === "maintenance_on" || action === "maintenance_off") {
+    if (!isAdminUser) { await answerCallback(env, callback.id, "غير مصرح."); return; }
+    data.settings.maintenance = action === "maintenance_on";
+    try { await saveData(env, data, sha); }
+    catch (error) {
+      console.error("MAINTENANCE SAVE ERROR:", error);
+      await answerCallback(env, callback.id, "فشل حفظ حالة الصيانة.");
+      await sendMessage(env, chatId, "❌ &lt;b&gt;تعذر تغيير وضع الصيانة.&lt;/b&gt;\n\nلم يتم اعتماد التغيير لأن حفظ البيانات في GitHub فشل."); return;
+    }
+    await answerCallback(env, callback.id);
+    if (data.settings.maintenance) {
+      await broadcastMaintenance(env, data);
+      await sendMessage(env, chatId, "🔴 &lt;b&gt;تم تفعيل وضع الصيانة.&lt;/b&gt;\n\nالمستخدمون العاديون لن يتمكنوا من استخدام البوت حتى إيقاف الصيانة.");
+    } else {
+      await broadcastMaintenanceOff(env, data);
+      await sendMessage(env, chatId, "🟢 &lt;b&gt;تم إيقاف وضع الصيانة.&lt;/b&gt;\n\nعاد البوت للعمل للمستخدمين.");
+    }
+    return;
+  }
+  if (action === "admin_works") {
+    if (!isAdminUser) { await answerCallback(env, callback.id, "غير مصرح."); return; }
+    await answerCallback(env, callback.id); await showAllWorks(chatId, env, data); return;
+  }
+  if (action === "admin_broadcast") {
+    if (!isAdminUser) { await answerCallback(env, callback.id, "غير مصرح."); return; }
+    data.users[chatId].state = { step: "admin_broadcast" };
+    await answerCallback(env, callback.id);
+    await sendMessage(env, chatId, "📢 &lt;b&gt;إرسال رسالة جماعية&lt;/b&gt;\n\nاكتب الآن الرسالة التي تريد إرسالها لجميع مستخدمي البوت.\n\n❌ للإلغاء أرسل /cancel");
+    await saveData(env, data, sha); return;
+  }
+}
+
+async function handleMessage(message, env) {
+  const chatId = String(message.chat.id);
+  const text = (message.text || "").trim();
+  const { data, sha } = await loadData(env);
+  const isAdminUser = isAdmin(chatId);
+  ensureUser(data, chatId);
+  if (text === "/start") { await startCommand(message, env, data, sha); return; }
+  if (text === "/admin") {
+    if (!isAdminUser) {
+      await sendMessage(env, chatId, "⛔ هذا الأمر متاح للمبرمج فقط.", null, data);
+      await saveData(env, data, sha); return;
+    }
+    await adminPanel(chatId, env, data); return;
+  }
+  if (isAdminUser &amp;&amp; text === "/cancel") {
+    const adminState = data.users[chatId].state;
+    if (adminState?.step === "admin_broadcast") {
+      data.users[chatId].state = null;
+      await sendMessage(env, chatId, "❌ تم إلغاء الرسالة الجماعية.");
+      await saveData(env, data, sha); return;
+    }
+  }
+  if (isAdminUser &amp;&amp; data.users[chatId].state?.step === "admin_broadcast") {
+    if (!text) { await sendMessage(env, chatId, "❌ أرسل نص الرسالة الجماعية.\n\nأو أرسل /cancel للإلغاء."); return; }
+    data.users[chatId].state = null;
+    await saveData(env, data, sha);
+    const result = await sendBroadcastMessage(env, data, text);
+    await sendMessage(env, chatId, `✅ &lt;b&gt;انتهى الإرسال الجماعي.&lt;/b&gt;\n\nتم الإرسال: ${result.sent}\nفشل الإرسال: ${result.failed}`);
+    return;
+  }
+  if (isMaintenance(data) &amp;&amp; !isAdminUser) {
+    await sendMessage(env, chatId, "🔧 &lt;b&gt;البوت في وضع الصيانة حاليًا.&lt;/b&gt;\n\nيرجى المحاولة مرة أخرى لاحقًا.", null, data);
+    await saveData(env, data, sha); return;
+  }
+  const now = Date.now();
+  const previousActivity = data.users[chatId].last_active || 0;
+  const shouldSaveActivity = now - previousActivity &gt; ACTIVE_TIME;
+  updateActivity(data, chatId);
+  if (text === "/add") { await addCommand(message, env, data, sha); return; }
+  if (text === "/list") { await listCommand(message, env, data, sha); return; }
+  const user = data.users[chatId];
+  if (!user.state) {
+    await sendMessage(env, chatId, "اختر أمرًا من القائمة 👇", mainKeyboard(), data);
+    await saveData(env, data, sha); return;
+  }
+  if (user.state.step === "waiting_type") {
+    await sendMessage(env, chatId, "🏷️ &lt;b&gt;اختر نوع العمل أولًا:&lt;/b&gt;", workTypeKeyboard(), data);
+    await saveData(env, data, sha); return;
+  }
+  if (user.state.step === "waiting_name") {
+    const type = user.state.type;
+    if (!text) {
+      await sendMessage(env, chatId, `❌ أرسل اسم ${escapeHtml(getTypeName(type))}.`, null, data);
+      await saveData(env, data, sha); return;
+    }
+    user.state = { step: "waiting_url", type, name: text };
+    await sendMessage(env, chatId, `🔗 الآن أرسل رابط صفحة ${escapeHtml(getTypeName(type))}.`, null, data);
+    await saveData(env, data, sha); return;
+  }
+  if (user.state.step === "waiting_url") {
+    const url = text;
+    const type = user.state.type;
+    const typeName = getTypeName(type);
+    if (!/^https?:\/\/\S+$/i.test(url)) {
+      await sendMessage(env, chatId, `❌ الرابط غير صحيح.\n\nأرسل رابط صفحة ${escapeHtml(typeName)} يبدأ بـ &lt;b&gt;http://&lt;/b&gt; أو &lt;b&gt;https://&lt;/b&gt;.`, null, data);
+      await saveData(env, data, sha); return;
+    }
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        redirect: "follow",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
+        }
+      });
+      const contentType = response.headers.get("content-type") || "";
+      console.log("URL VALIDATION:", {
+        requestedUrl: url,
+        finalUrl: response.url,
+        status: response.status,
+        contentType
+      });
+      if (!response.ok) {
+        const statusMessage = response.status === 403
           ? "قد يكون الموقع قد رفض الطلب بسبب الحماية أو صلاحيات الوصول."
           : response.status === 429
             ? "الموقع يحد من عدد الطلبات. حاول لاحقًا."
             : response.status === 404
               ? "الصفحة غير موجودة. تحقق من الرابط."
-              : "تحقق من سجلات الاتصال وحاول لاحقًا."
-      ),
-      null,
-      data
-    );
-
-    await saveData(env, data, sha);
-    return;
+              : "تحقق من سجلات الاتصال وحاول لاحقًا.";
+        await sendMessage(env, chatId, `⚠️ تعذر التحقق من صفحة العمل.\n\nرمز استجابة الموقع: ${response.status}\n\n${statusMessage}`, null, data);
+        await saveData(env, data, sha); return;
+      }
+      if (contentType &amp;&amp; !contentType.includes("text/html") &amp;&amp; !contentType.includes("application/xhtml+xml")) {
+        console.warn("Unexpected content type:", contentType);
+      }
+      // تنبيه: استجابة 200 لا تضمن أن الصفحة تحتوي على الفصل؛ قد تكون صفحة تحقق أو حظر.
+    } catch (error) {
+      console.error("URL FETCH ERROR:", { url, message: String(error) });
+      await sendMessage(env, chatId, "⚠️ تعذر الاتصال بصفحة العمل. تحقق من الرابط أو حاول مرة أخرى لاحقًا.", null, data);
+      await saveData(env, data, sha); return;
+    }
+    user.state = { step: "waiting_chapter", type, name: user.state.name, url };
+    await sendMessage(env, chatId, `🔢 ممتاز.\n\nأرسل رقم آخر فصل صدر من ${escapeHtml(typeName)} حاليًا.\n\nمثال: &lt;b&gt;125&lt;/b&gt;`, null, data);
+    await saveData(env, data, sha); return;
   }
-
-  if (
-    contentType &&
-    !contentType.includes("text/html") &&
-    !contentType.includes("application/xhtml+xml")
-  ) {
-    console.warn("Unexpected content type:", contentType);
+  if (user.state.step === "waiting_chapter") {
+    const type = user.state.type;
+    const typeName = getTypeName(type);
+    const chapter = Number(normalizeDigits(text));
+    if (!Number.isInteger(chapter) || chapter &lt; 0) {
+      await sendMessage(env, chatId, `❌ أرسل رقم فصل صحيح لـ ${escapeHtml(typeName)}.\n\nمثال: &lt;b&gt;125&lt;/b&gt;`, null, data);
+      await saveData(env, data, sha); return;
+    }
+    user.works.push({ type, name: user.state.name, url: user.state.url, last_chapter: chapter });
+    const workName = user.state.name;
+    user.state = null;
+    await sendMessage(env, chatId, `✅ &lt;b&gt;تمت إضافة ${escapeHtml(typeName)} بنجاح!&lt;/b&gt;\n\n📖 ${escapeHtml(workName)}\n🔢 آخر فصل: ${chapter}\n\nسيحتفظ Sandrone بهذه ${escapeHtml(typeName)} ضمن قائمتك.`, null, data);
+    await saveData(env, data, sha); return;
   }
-
-} catch (error) {
-  console.error("URL FETCH ERROR:", {
-    url,
-    message: String(error)
-  });
-
-  await sendMessage(
-    env,
-    chatId,
-    "⚠️ تعذر الاتصال بصفحة العمل. " +
-    "تحقق من الرابط أو حاول مرة أخرى لاحقًا.",
-    null,
-    data
-  );
-
-  await saveData(env, data, sha);
-  return;
+  if (shouldSaveActivity) await saveData(env, data, sha);
 }
 
-user.state = {  
-
-  step:  
-    "waiting_chapter",  
-
-  type,  
-
-  name:  
-    user.state.name,  
-
-  url  
-};  
-
-await sendMessage(  
-  env,  
-  chatId,  
-  `🔢 ممتاز.\n\n` +  
-  `أرسل رقم آخر فصل صدر من ${escapeHtml(typeName)} حاليًا.\n\n` +  
-  "مثال: <b>125</b>",  
-  null,  
-  data  
-);  
-
-await saveData(  
-  env,  
-  data,  
-  sha  
-);  
-
-return;
-
+function normalizeDigits(text) {
+  return String(text)
+    .replace(/[٠-٩]/g, digit =&gt; String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
+    .replace(/[۰-۹]/g, digit =&gt; String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)));
 }
 
-// ==================================================
-// WAITING CHAPTER
-// ==================================================
-
-if (
-user.state.step ===
-"waiting_chapter"
-) {
-
-const type =  
-  user.state.type;  
-
-const typeName =  
-  getTypeName(type);  
-
-const normalizedText =  
-  normalizeDigits(text);  
-
-const chapter =  
-  Number(normalizedText);  
-
-if (  
-  !Number.isInteger(chapter) ||  
-  chapter < 0  
-) {  
-
-  await sendMessage(  
-    env,  
-    chatId,  
-    `❌ أرسل رقم فصل صحيح لـ ${escapeHtml(typeName)}.\n\n` +  
-    "مثال: <b>125</b>",  
-    null,  
-    data  
-  );  
-
-  await saveData(  
-    env,  
-    data,  
-    sha  
-  );  
-
-  return;  
-}  
-
-user.works.push({  
-
-  type,  
-
-  name:  
-    user.state.name,  
-
-  url:  
-    user.state.url,  
-
-  last_chapter:  
-    chapter  
-});  
-
-const workName =  
-  user.state.name;  
-
-user.state =  
-  null;  
-
-await sendMessage(  
-  env,  
-  chatId,  
-  `✅ <b>تمت إضافة ${escapeHtml(typeName)} بنجاح!</b>\n\n` +  
-  `📖 ${escapeHtml(workName)}\n` +  
-  `🔢 آخر فصل: ${chapter}\n\n` +  
-  `سيحتفظ Sandrone بهذه ${escapeHtml(typeName)} ضمن قائمتك.`,  
-  null,  
-  data  
-);  
-
-await saveData(  
-  env,  
-  data,  
-  sha  
-);  
-
-return;
-
+async function adminPanel(chatId, env, data) {
+  if (!isAdmin(chatId)) return;
+  const users = Object.keys(data.users || {});
+  const now = Date.now();
+  let activeUsers = 0;
+  let totalWorks = 0;
+  for (const userId of users) {
+    const user = data.users[userId];
+    if (!user) continue;
+    if (now - (user.last_active || 0) &lt;= ACTIVE_TIME) activeUsers++;
+    totalWorks += Array.isArray(user.works) ? user.works.length : 0;
+  }
+  const maintenance = isMaintenance(data);
+  const botStatus = maintenance ? "🔴 في وضع الصيانة" : "🟢 يعمل";
+  const text = "🛠️ &lt;b&gt;لوحة تحكم Sandrone&lt;/b&gt;\n\n" +
+    `🤖 حالة البوت: &lt;b&gt;${botStatus}&lt;/b&gt;\n\n` +
+    `👥 إجمالي المشتركين: &lt;b&gt;${users.length}&lt;/b&gt;\n` +
+    `🟢 المستخدمون النشطون: &lt;b&gt;${activeUsers}&lt;/b&gt;\n` +
+    `📚 إجمالي الأعمال المراقبة: &lt;b&gt;${totalWorks}&lt;/b&gt;`;
+  await sendMessage(env, chatId, text, [
+    [{ text: "📚 جميع الأعمال", callback_data: "admin_works" }],
+    [{ text: "📢 رسالة جماعية", callback_data: "admin_broadcast" }],
+    [{ text: maintenance ? "🟢 إيقاف الصيانة" : "🔴 تفعيل الصيانة", callback_data: maintenance ? "maintenance_off" : "maintenance_on" }]
+  ]);
 }
 
-// ==================================================
-// SAVE ACTIVITY
-// ==================================================
-
-if (
-shouldSaveActivity
-) {
-
-await saveData(  
-  env,  
-  data,  
-  sha  
-);
-
-}
-}
-
-// ======================================================
-// NORMALIZE DIGITS
-// ======================================================
-
-function normalizeDigits(
-text
-) {
-
-return String(text)
-
-.replace(  
-  /[٠-٩]/g,  
-  digit =>  
-    String(  
-      "٠١٢٣٤٥٦٧٨٩"  
-        .indexOf(digit)  
-    )  
-)  
-
-.replace(  
-  /[۰-۹]/g,  
-  digit =>  
-    String(  
-      "۰۱۲۳۴۵۶۷۸۹"  
-        .indexOf(digit)  
-    )  
-);
-
+async function showAllWorks(chatId, env, data) {
+  let text = "📚 &lt;b&gt;جميع الأعمال المراقبة&lt;/b&gt;\n\n";
+  let total = 0;
+  for (const userId of Object.keys(data.users || {})) {
+    const user = data.users[userId];
+    if (!user || !Array.isArray(user.works)) continue;
+    for (const work of user.works) {
+      total++;
+      text += `👤 &lt;b&gt;المستخدم:&lt;/b&gt; ${escapeHtml(userId)}\n` +
+        `📖 &lt;b&gt;الاسم:&lt;/b&gt; ${escapeHtml(work.name)}\n` +
+        `🏷️ &lt;b&gt;النوع:&lt;/b&gt; ${escapeHtml(work.type || "رواية")}\n` +
+        `🔢 &lt;b&gt;آخر فصل:&lt;/b&gt; ${work.last_chapter}\n` +
+        `🔗 &lt;b&gt;الرابط:&lt;/b&gt; ${escapeHtml(work.url)}\n\n━━━━━━━━━━━━━━\n\n`;
+    }
+  }
+  text += total === 0 ? "لا توجد أعمال مراقبة حاليًا." : `📊 &lt;b&gt;الإجمالي: ${total}&lt;/b&gt;`;
+  await sendMessage(env, chatId, text);
 }
 
-// ======================================================
-// ADMIN PANEL
-// ======================================================
-
-async function adminPanel(
-chatId,
-env,
-data
-) {
-
-if (!isAdmin(chatId)) {
-return;
+async function broadcastMaintenance(env, data) {
+  const message = "🔧 &lt;b&gt;تنبيه صيانة Sandrone&lt;/b&gt;\n\nتم تفعيل وضع الصيانة في Sandrone.\n\nلن تتمكن من استخدام البوت مؤقتًا حتى انتهاء الصيانة.";
+  for (const userId of Object.keys(data.users || {})) {
+    if (String(userId) === String(ADMIN_CHAT_ID)) continue;
+    try { await sendMessage(env, userId, message); }
+    catch (error) { console.error("Broadcast error:", userId, error); }
+  }
 }
-
-const users =
-Object.keys(
-data.users || {}
-);
-
-const now =
-Date.now();
-
-let activeUsers =
-0;
-
-let totalWorks =
-0;
-
-users.forEach(
-userId => {
-
-const user =  
-    data.users[userId];  
-
-  if (!user) {  
-    return;  
-  }  
-
-  if (  
-    now -  
-    (user.last_active || 0)  
-    <=  
-    ACTIVE_TIME  
-  ) {  
-
-    activeUsers++;  
-  }  
-
-  totalWorks +=  
-    Array.isArray(user.works)  
-      ? user.works.length  
-      : 0;  
+async function broadcastMaintenanceOff(env, data) {
+  for (const userId of Object.keys(data.users || {})) {
+    if (String(userId) === String(ADMIN_CHAT_ID)) continue;
+    try { await sendMessage(env, userId, "🟢 &lt;b&gt;عاد Sandrone للعمل&lt;/b&gt;"); }
+    catch (error) { console.error("Maintenance off broadcast error:", userId, error); }
+  }
 }
-
-);
-
-const maintenance =
-isMaintenance(data);
-
-const botStatus =
-maintenance
-? "🔴 في وضع الصيانة"
-: "🟢 يعمل";
-
-const text =
-"🛠️ <b>لوحة تحكم Sandrone</b>\n\n" +
-🤖 حالة البوت: <b>${botStatus}</b>\n\n +
-👥 إجمالي المشتركين: <b>${users.length}</b>\n +
-🟢 المستخدمون النشطون: <b>${activeUsers}</b>\n +
-📚 إجمالي الأعمال المراقبة: <b>${totalWorks}</b>;
-
-await sendMessage(
-env,
-chatId,
-text,
-[
-[
-{
-text:
-"📚 جميع الأعمال",
-
-callback_data:  
-        "admin_works"  
-    }  
-  ],  
-
-  [  
-    {  
-      text:  
-        "📢 رسالة جماعية",  
-
-      callback_data:  
-        "admin_broadcast"  
-    }  
-  ],  
-
-  [  
-    {  
-      text:  
-        maintenance  
-          ? "🟢 إيقاف الصيانة"  
-          : "🔴 تفعيل الصيانة",  
-
-      callback_data:  
-        maintenance  
-          ? "maintenance_off"  
-          : "maintenance_on"  
-    }  
-  ]  
-]
-
-);
+async function sendBroadcastMessage(env, data, message) {
+  let sent = 0;
+  let failed = 0;
+  for (const userId of Object.keys(data.users || {})) {
+    if (String(userId) === String(ADMIN_CHAT_ID)) continue;
+    try {
+      const result = await sendMessage(env, userId, message);
+      if (result?.ok) sent++; else failed++;
+    } catch (error) { failed++; console.error("Broadcast message error:", userId, error); }
+  }
+  console.log(`Broadcast finished. Sent: ${sent}, Failed: ${failed}`);
+  return { sent, failed };
 }
-
-// ======================================================
-// SHOW ALL WORKS
-// ======================================================
-
-async function showAllWorks(
-chatId,
-env,
-data
-) {
-
-let text =
-"📚 <b>جميع الأعمال المراقبة</b>\n\n";
-
-let total =
-0;
-
-for (
-const userId of
-Object.keys(
-data.users || {}
-)
-) {
-
-const user =  
-  data.users[userId];  
-
-if (  
-  !user ||  
-  !Array.isArray(user.works)  
-) {  
-
-  continue;  
-}  
-
-for (  
-  const work of  
-  user.works  
-) {  
-
-  total++;  
-
-  const type =  
-    work.type || "رواية";  
-
-  text +=  
-    `👤 <b>المستخدم:</b> ${escapeHtml(userId)}\n` +  
-    `📖 <b>الاسم:</b> ${escapeHtml(work.name)}\n` +  
-    `🏷️ <b>النوع:</b> ${escapeHtml(type)}\n` +  
-    `🔢 <b>آخر فصل:</b> ${work.last_chapter}\n` +  
-    `🔗 <b>الرابط:</b> ${escapeHtml(work.url)}\n\n` +  
-    "━━━━━━━━━━━━━━\n\n";  
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&amp;/g, "&amp;amp;")
+    .replace(/&lt;/g, "&amp;lt;")
+    .replace(/&gt;/g, "&amp;gt;")
+    .replace(/"/g, "&amp;quot;");
 }
-
-}
-
-if (total === 0) {
-
-text +=  
-  "لا توجد أعمال مراقبة حاليًا.";
-
-} else {
-
-text +=  
-  `📊 <b>الإجمالي: ${total}</b>`;
-
-}
-
-await sendMessage(
-env,
-chatId,
-text
-);
-}
-
-// ======================================================
-// MAINTENANCE BROADCAST
-// ======================================================
-
-async function broadcastMaintenance(
-env,
-data
-) {
-
-const message =
-"🔧 <b>تنبيه صيانة Sandrone</b>\n\n" +
-"تم تفعيل وضع الصيانة في Sandrone.\n\n" +
-"لن تتمكن من استخدام البوت مؤقتًا حتى انتهاء الصيانة.";
-
-for (
-const userId of
-Object.keys(
-data.users || {}
-)
-) {
-
-if (  
-  String(userId) ===  
-  String(ADMIN_CHAT_ID)  
-) {  
-
-  continue;  
-}  
-
-try {  
-
-  await sendMessage(  
-    env,  
-    userId,  
-    message  
-  );  
-
-} catch (error) {  
-
-  console.error(  
-    "Broadcast error:",  
-    userId,  
-    error  
-  );  
-}
-
-}
-}
-
-// ======================================================
-// MAINTENANCE OFF BROADCAST
-// ======================================================
-
-async function broadcastMaintenanceOff(
-env,
-data
-) {
-
-const message =
-"🟢 <b>عاد Sandrone للعمل</b>";
-
-for (
-const userId of
-Object.keys(
-data.users || {}
-)
-) {
-
-if (  
-  String(userId) ===  
-  String(ADMIN_CHAT_ID)  
-) {  
-
-  continue;  
-}  
-
-try {  
-
-  await sendMessage(  
-    env,  
-    userId,  
-    message  
-  );  
-
-} catch (error) {  
-
-  console.error(  
-    "Maintenance off broadcast error:",  
-    userId,  
-    error  
-  );  
-}
-
-}
-}
-
-// ======================================================
-// GENERAL BROADCAST
-// ======================================================
-
-async function sendBroadcastMessage(
-env,
-data,
-message
-) {
-
-let sent =
-0;
-
-let failed =
-0;
-
-for (
-const userId of
-Object.keys(
-data.users || {}
-)
-) {
-
-if (  
-  String(userId) ===  
-  String(ADMIN_CHAT_ID)  
-) {  
-
-  continue;  
-}  
-
-try {  
-
-  const result =  
-    await sendMessage(  
-      env,  
-      userId,  
-      message  
-    );  
-
-  if (  
-    result &&  
-    result.ok  
-  ) {  
-
-    sent++;  
-
-  } else {  
-
-    failed++;  
-  }  
-
-} catch (error) {  
-
-  failed++;  
-
-  console.error(  
-    "Broadcast message error:",  
-    userId,  
-    error  
-  );  
-}
-
-}
-
-console.log(
-Broadcast finished. Sent: ${sent}, Failed: ${failed}
-);
-
-return {
-sent,
-failed
-};
-}
-
-// ======================================================
-// ESCAPE HTML
-// ======================================================
-
-function escapeHtml(
-text
-) {
-
-return String(text)
-
-.replace(  
-  /&/g,  
-  "&amp;"  
-)  
-
-.replace(  
-  /</g,  
-  "&lt;"  
-)  
-
-.replace(  
-  />/g,  
-  "&gt;"  
-)  
-
-.replace(  
-  /"/g,  
-  "&quot;"  
-);
-
-}
+</pre></main></body></html>
