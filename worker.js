@@ -437,15 +437,36 @@ async function handleMessage(message, env) {
         contentType
       });
       if (!response.ok) {
-        const statusMessage = response.status === 403
-          ? "قد يكون الموقع قد رفض الطلب بسبب الحماية أو صلاحيات الوصول."
-          : response.status === 429
-            ? "الموقع يحد من عدد الطلبات. حاول لاحقًا."
-            : response.status === 404
-              ? "الصفحة غير موجودة. تحقق من الرابط."
-              : "تحقق من سجلات الاتصال وحاول لاحقًا.";
-        await sendMessage(env, chatId, `⚠️ تعذر التحقق من صفحة العمل.\n\nرمز استجابة الموقع: ${response.status}\n\n${statusMessage}`, null, data);
-        await saveData(env, data, sha); return;
+        // سجّل تفاصيل الرفض لتشخيصه، مع إبقاء التحقق صارمًا وعدم قبول الرابط.
+        const responseBody = await response.text();
+        console.error("URL VALIDATION FAILED:", {
+          requestedUrl: url,
+          finalUrl: response.url,
+          status: response.status,
+          contentType,
+          server: response.headers.get("server"),
+          cfRay: response.headers.get("cf-ray"),
+          bodyPreview: responseBody.slice(0, 1000)
+        });
+
+        let statusMessage = "رفض الموقع طلب الوصول. راجع سجلات Worker للتفاصيل.";
+        if (response.status === 403) {
+          statusMessage = "الموقع رفض طلب الخادم (قد تكون حماية من الطلبات الآلية).";
+        } else if (response.status === 429) {
+          statusMessage = "الموقع يحد من عدد الطلبات. حاول لاحقًا.";
+        } else if (response.status === 404) {
+          statusMessage = "الصفحة غير موجودة. تحقق من الرابط.";
+        }
+
+        await sendMessage(
+          env,
+          chatId,
+          `⚠️ تعذر التحقق من صفحة العمل.\n\nرمز استجابة الموقع: ${response.status}\n\n${statusMessage}\n\nلم تتم إضافة العمل إلى قائمتك.`,
+          null,
+          data
+        );
+        await saveData(env, data, sha);
+        return;
       }
       if (contentType && !contentType.includes("text/html") && !contentType.includes("application/xhtml+xml")) {
         console.warn("Unexpected content type:", contentType);
