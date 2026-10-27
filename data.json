@@ -10,13 +10,11 @@
         }
       ],
       "state": {
-        "step": "waiting_url",
-        "type": "رواية",
-        "name": "Start By Signing In And Obtaining The Ancient Divine Body"
+        "step": "waiting_type"
       },
       "first_seen": 1790025835463,
-      "last_active": 1793056659439,
-      "last_bot_message_id": 441
+      "last_active": 1793063653961,
+      "last_bot_message_id": 446
     },
     "2057656653": {
       "works": [],
