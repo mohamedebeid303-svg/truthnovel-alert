@@ -7,17 +7,18 @@
           "name": "Lord Of The Truth",
           "url": "https://truthnovel.top/",
           "last_chapter": 2524
+        },
+        {
+          "type": "رواية",
+          "name": "Starting as a Son-In-Law to Establish an Immortal Family",
+          "url": "https://www.piaotia.com/html/15/15939/",
+          "last_chapter": 1254
         }
       ],
-      "state": {
-        "step": "waiting_chapter",
-        "type": "رواية",
-        "name": "Starting as a Son-In-Law to Establish an Immortal Family",
-        "url": "https://www.piaotia.com/html/15/15939/"
-      },
+      "state": null,
       "first_seen": 1790025835463,
-      "last_active": 1793063799058,
-      "last_bot_message_id": 453
+      "last_active": 1793063820093,
+      "last_bot_message_id": 455
     },
     "2057656653": {
       "works": [],
