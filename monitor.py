@@ -149,6 +149,16 @@ def site_root(site_url):
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
+def is_truthnovel_site(url):
+    try:
+        host = urlparse(url).netloc.lower()
+        if host.startswith("www."):
+            host = host[4:]
+        return host == "truthnovel.top"
+    except Exception:
+        return False
+
+
 # ============================================================
 # CHAPTER NUMBER EXTRACTION
 # ============================================================
@@ -731,6 +741,23 @@ def crawl_chapter_pages(start_url, old_chapter):
             if candidate.url not in visited and candidate.url not in queue:
                 queue.append(candidate.url)
 
+        # TruthNovel: الانتقال من الصفحة الرئيسية إلى صفحة تفاصيل الرواية.
+        if is_truthnovel_site(start_url) and current == start_url and soup:
+            for link in soup.find_all("a", href=True):
+                target = absolute_url(current, link.get("href", ""))
+                if not target or not same_domain(start_url, target):
+                    continue
+
+                path = urlparse(target).path.rstrip("/")
+
+                if (
+                    path.startswith("/novels/")
+                    and target not in visited
+                    and target not in queue
+                ):
+                    print(f"[TRUTHNOVEL] Found novel page: {target}")
+                    queue.insert(0, target)
+
         # أولوية روابط السابق/التالي، ثم الروابط التي تحمل رقم فصل.
         if soup:
             navigation_urls = []
@@ -1058,6 +1085,15 @@ def discover_verified_chapters(site_url, old_chapter):
         print(f"[CRAWL] Error: {exc}")
 
     if log_contiguous("CRAWL"):
+        return all_verified
+
+    # TruthNovel لا يستخدم مسارات WordPress أو RSS أو Sitemap
+    # التي ثبت أنها تعيد 404؛ نعتمد على صفحة الرواية وروابط فصولها.
+    if is_truthnovel_site(site_url):
+        print(
+            "[TRUTHNOVEL] Skipping WordPress, RSS and Sitemap. "
+            "Using the novel page and chapter links only."
+        )
         return all_verified
 
     print("[DISCOVER] Stage 2/4: checking WordPress API...")
